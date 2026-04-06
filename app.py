@@ -13,7 +13,7 @@ LOGO_URL = "https://raw.githubusercontent.com/malaykapoor95/Recruitment-engine/m
 col_title, col_logo = st.columns([4, 1])
 with col_title:
     st.title("Trident Project Command")
-    st.caption("Operational Dashboard | Pilot Phase | April 6, 2026")
+    st.caption("Operational Dashboard | Pilot Phase | June 2026")
 with col_logo:
     st.image(LOGO_URL, width=120)
 
