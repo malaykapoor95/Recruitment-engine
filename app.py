@@ -30,7 +30,8 @@ st.markdown("""
 LOGO_URL = "https://raw.githubusercontent.com/malaykapoor95/Recruitment-engine/main/logo.png"
 
 # --- 2. CONFIGURATION & ROLE KEYS ---
-GAS_URL = "https://script.google.com/macros/s/AKfycbzHBCGpDIXjozsRDvJgStMIQvV_W1Lf_zSptRjrzGjMRuvtD2ZnUQd7gLESgEtegp_D/exec"
+# UPDATED WITH YOUR NEW DEPLOYED LINK:
+GAS_URL = "https://script.google.com/macros/s/AKfycbyd9frwLp6l7vn6e26d7Vg07Sbo095ah2kWIFE6ZSmEsvpwUAesry90p_eKq0KNlEcr/exec"
 CENTER_MAP = {"Center 1": "C1", "Center 2": "C2", "Center 3": "C3"}
 
 ACCESS_KEYS = {
@@ -57,7 +58,6 @@ if not st.session_state.logged_in:
         with st.container(border=True):
             st.markdown("### Welcome to Trident Command")
             st.caption("Please authenticate to access your operational dashboard.")
-            # Visible Access Code Input
             user_code = st.text_input("Enter Access Code:")
             
             if st.button("Secure Login", type="primary", use_container_width=True):
@@ -106,7 +106,7 @@ sel_center = st.session_state.sel_center
 c_code = CENTER_MAP[sel_center]
 
 # --- DATA HELPERS (AGGRESSIVELY CACHED FOR SPEED) ---
-@st.cache_data(ttl=120) # Caches data for 2 minutes to eliminate lag
+@st.cache_data(ttl=120) 
 def fetch_tab_data(tab_name):
     try:
         r = requests.get(f"{GAS_URL}?tab={tab_name}")
@@ -121,7 +121,7 @@ def fetch_tab_data(tab_name):
 def push_data(payload):
     try: 
         r = requests.post(GAS_URL, json=payload)
-        st.cache_data.clear() # Clears memory instantly when data is added/changed
+        st.cache_data.clear()
         return r.text 
     except: return None
 
@@ -186,7 +186,7 @@ def render_issues():
 if active_view == "Admin":
     render_top_metrics()
     st.write("")
-    col_main, col_side = st.columns([2.2, 1]) # 8/4 split equivalent
+    col_main, col_side = st.columns([2.2, 1])
     
     with col_main:
         with st.container(border=True):
@@ -229,7 +229,6 @@ elif active_view == "Recruitment":
             tab_man, tab_csv = st.tabs(["Manual Entry", "Bulk CSV Upload"])
             
             with tab_man:
-                # FULL DEMOGRAPHIC FIELDS INCLUDED
                 c_a, c_b, c_c = st.columns(3)
                 s_type = c_a.selectbox("Category", ["1 Person", "2-3 People", "4-5 People"])
                 venue = c_b.selectbox("Venue", [f"House {i+1}" for i in range(10)])
