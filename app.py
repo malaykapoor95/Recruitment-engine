@@ -22,7 +22,6 @@ LOGO_URL = "https://raw.githubusercontent.com/malaykapoor95/Recruitment-engine/m
 GAS_URL = "https://script.google.com/macros/s/AKfycbzHBCGpDIXjozsRDvJgStMIQvV_W1Lf_zSptRjrzGjMRuvtD2ZnUQd7gLESgEtegp_D/exec"
 CENTER_MAP = {"Center 1": "C1", "Center 2": "C2", "Center 3": "C3"}
 
-# Master Access Codes mapping directly to Roles and Centers
 ACCESS_KEYS = {
     "TR-ADMIN-99": {"role": "Admin", "center": "Center 1"},
     "REC-C1": {"role": "Recruitment", "center": "Center 1"},
@@ -36,7 +35,7 @@ ACCESS_KEYS = {
 if 'logged_in' not in st.session_state: st.session_state.logged_in = False
 if 'issues' not in st.session_state: st.session_state.issues = []
 
-# --- 3. WELCOME & LOGIN SCREEN (NO PASSWORD MASKING) ---
+# --- 3. WELCOME & LOGIN SCREEN ---
 if not st.session_state.logged_in:
     col_t, col_l = st.columns([4, 1])
     col_l.image(LOGO_URL, width=120)
@@ -47,7 +46,6 @@ if not st.session_state.logged_in:
         with st.container(border=True):
             st.markdown("### Welcome to Trident Command")
             st.caption("Please authenticate to access your operational dashboard.")
-            # type="password" REMOVED - Text is now fully visible
             user_code = st.text_input("Enter Access Code (e.g., TR-ADMIN-99 or MGR-C1):")
             
             if st.button("Secure Login", type="primary", use_container_width=True):
@@ -74,7 +72,6 @@ st.divider()
 role = st.session_state.user_role
 sel_center = st.session_state.sel_center
 
-# Sidebar Controls
 if role == "Admin":
     st.sidebar.title("Admin Controls")
     sel_center = st.sidebar.selectbox("Override Center", ["Center 1", "Center 2", "Center 3"], index=["Center 1", "Center 2", "Center 3"].index(sel_center))
@@ -86,13 +83,24 @@ else:
     st.sidebar.success(f"Logged in as: {role}")
     st.sidebar.caption(f"Assigned to: {sel_center}")
 
+# NEW: Manual Refresh Button
+if st.sidebar.button("🔄 Refresh Data", use_container_width=True):
+    st.cache_data.clear() # Wipes the memory so the next load pulls fresh from Google
+    st.rerun()
+
+st.sidebar.write("") # Spacer
 if st.sidebar.button("Log Out"):
     st.session_state.logged_in = False
+    st.cache_data.clear()
     st.rerun()
 
 c_code = CENTER_MAP[sel_center]
 
-# --- DATA HELPERS ---
+# --- DATA HELPERS (NOW WITH CACHING) ---
+
+# The @st.cache_data decorator saves the result for 60 seconds.
+# This prevents the 3-6 second loading delay on every click.
+@st.cache_data(ttl=60)
 def fetch_tab_data(tab_name):
     try:
         r = requests.get(f"{GAS_URL}?tab={tab_name}")
@@ -105,10 +113,14 @@ def fetch_tab_data(tab_name):
     except: return pd.DataFrame()
 
 def push_data(payload):
-    try: r = requests.post(GAS_URL, json=payload); return r.text 
+    try: 
+        r = requests.post(GAS_URL, json=payload)
+        # Clear the cache automatically after we push new data so the UI updates instantly
+        st.cache_data.clear()
+        return r.text 
     except: return None
 
-# Load Center Data
+# Load Center Data (This is now practically instant after the first load)
 frames = [fetch_tab_data(f"{p}{c_code}") for p in ["1-", "2-", "4-"]]
 df_all = pd.concat([f for f in frames if not f.empty], ignore_index=True) if frames else pd.DataFrame()
 
@@ -185,7 +197,6 @@ if active_view == "Overview":
                 st.progress(min(m_c/580, 1.0), text=f"Male ({m_c} / 580)")
                 st.progress(min(f_c/580, 1.0), text=f"Female ({f_c} / 580)")
 
-        # Venue Performance Grid
         v_col1, v_col2 = st.columns(2)
         for i in range(4):
             tgt_col = v_col1 if i % 2 == 0 else v_col2
@@ -207,7 +218,6 @@ elif active_view == "Recruitment":
     col_main, col_side = st.columns([2, 1])
     
     with col_main:
-        # Recruiter Quota Toggle Button
         if 'show_quotas' not in st.session_state: st.session_state.show_quotas = False
         if st.button("📊 Toggle Center Quotas View", use_container_width=True):
             st.session_state.show_quotas = not st.session_state.show_quotas
@@ -231,7 +241,9 @@ elif active_view == "Recruitment":
                 c3, c4 = st.columns(2)
                 rid = c3.text_input("Respondent ID")
                 fn = c4.text_input("First Name")
-                if st.button("Add Single Recruit", type="primary"): st.success("Recruit added successfully.")
+                if st.button("Add Single Recruit", type="primary"): 
+                    # Simulating a backend call that would trigger clear cache
+                    st.success("Recruit added successfully.")
             
             with tab_csv:
                 st.info("Upload a CSV file containing your bulk respondent list.")
@@ -283,10 +295,15 @@ elif active_view == "Host":
                             status = p.get('Booking_Status', 'Scheduled')
                             color = "🟢" if status == "Completed" else "🔵" if status == "Arrived" else "🔴" if status == "No-Show" else "⚪"
                             st.write(f"{color} **{p.get('First_Name')}** (ID: {p.get('Respondent_Id')}) - {status}")
+                        
                         ca, cc, cn = st.columns(3)
-                        if ca.button("Mark Arrived", key=f"a_{g_id}", use_container_width=True): push_data({"action": "update", "center": curr_tab, "group_id": g_id, "status": "Arrived"}); st.rerun()
-                        if cc.button("Mark Completed", key=f"c_{g_id}", type="primary", use_container_width=True): push_data({"action": "update", "center": curr_tab, "group_id": g_id, "status": "Completed"}); st.rerun()
-                        if cn.button("Mark No-Show", key=f"n_{g_id}", use_container_width=True): push_data({"action": "update", "center": curr_tab, "group_id": g_id, "status": "No-Show"}); st.rerun()
+                        # When a host taps a button, a spinner shows, the data pushes, and the cache clears automatically
+                        if ca.button("Mark Arrived", key=f"a_{g_id}", use_container_width=True): 
+                            with st.spinner("Syncing..."): push_data({"action": "update", "center": curr_tab, "group_id": g_id, "status": "Arrived"}); st.rerun()
+                        if cc.button("Mark Completed", key=f"c_{g_id}", type="primary", use_container_width=True): 
+                            with st.spinner("Syncing..."): push_data({"action": "update", "center": curr_tab, "group_id": g_id, "status": "Completed"}); st.rerun()
+                        if cn.button("Mark No-Show", key=f"n_{g_id}", use_container_width=True): 
+                            with st.spinner("Syncing..."): push_data({"action": "update", "center": curr_tab, "group_id": g_id, "status": "No-Show"}); st.rerun()
             else: st.info("No roster data available.")
 
     with col_side:
