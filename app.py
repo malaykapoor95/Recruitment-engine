@@ -6,7 +6,7 @@ from datetime import datetime
 # --- PAGE CONFIG ---
 st.set_page_config(page_title="Trident Project Command", layout="wide")
 
-# --- 1. BRANDING ---
+# --- 1. BRANDING (Top Right Logo) ---
 LOGO_URL = "https://raw.githubusercontent.com/malaykapoor95/Recruitment-engine/main/logo.png"
 
 col_title, col_logo = st.columns([4, 1])
@@ -18,10 +18,10 @@ with col_logo:
 
 st.divider()
 
-# --- 2. CONFIGURATION & ACCESS CODES ---
+# --- 2. CONFIGURATION & STEALTH ACCESS ---
 GAS_URL = "https://script.google.com/macros/s/AKfycbzHBCGpDIXjozsRDvJgStMIQvV_W1Lf_zSptRjrzGjMRuvtD2ZnUQd7gLESgEtegp_D/exec"
 
-# Define your secret codes here
+# Access codes map to specific centers
 ACCESS_CODES = {
     "TR-C1": "Center 1",
     "TR-C2": "Center 2",
@@ -32,18 +32,16 @@ ACCESS_CODES = {
 st.sidebar.title("Secure Access")
 user_code = st.sidebar.text_input("Enter Center Access Code", type="password")
 
-# Check if the code is valid
 if user_code in ACCESS_CODES:
     sel_center = ACCESS_CODES[user_code]
     st.sidebar.success(f"Access Granted: {sel_center}")
     
-    # Map for data fetching
     CENTER_MAP = {"Center 1": "C1", "Center 2": "C2", "Center 3": "C3"}
     c_code = CENTER_MAP[sel_center]
+    role = st.sidebar.selectbox("Access Level", ["Overview", "Recruitment", "Host"])
     
-    # Role Selection (Vendors only see Recruitment/Host)
-    role = st.sidebar.selectbox("Access Level", ["Recruitment", "Host", "Overview"])
-    
+    if 'step' not in st.session_state: st.session_state.step = 1
+
     # --- DATA HELPERS ---
     def fetch_tab_data(tab_name):
         try:
@@ -51,26 +49,39 @@ if user_code in ACCESS_CODES:
             data = r.json()
             if not data or len(data) < 2: return pd.DataFrame()
             df = pd.DataFrame(data[1:], columns=data[0])
+            # DATA GUARD: Standardize headers to handle typos in Google Sheets
             df.columns = [str(c).strip().title() for c in df.columns]
+            df.columns = [c.replace("Height (Inches)", "Height") for c in df.columns]
+            df.columns = [c.replace("Booking Status", "Booking_Status") for c in df.columns]
+            df.columns = [c.replace("Group Id", "Group_Id") for c in df.columns]
+            df.columns = [c.replace("Respondent Id", "Respondent_Id") for c in df.columns]
+            df.columns = [c.replace("Venue Id", "Venue_Id") for c in df.columns]
             return df
         except: return pd.DataFrame()
 
     def push_data(payload):
         try:
             r = requests.post(GAS_URL, json=payload)
-            return r.text 
+            return r.text # Returns the generated House ID (e.g., 2C1H001)
         except: return None
+
+    def get_height_tier(inches):
+        try:
+            i = int(inches)
+            if 58 <= i <= 63: return "Tier 1 (4'10\"-5'2\")"
+            elif 64 <= i <= 68: return "Tier 2 (5'3\"-5'7\")"
+            elif 69 <= i <= 72: return "Tier 3 (5'8\"-6'1\")"
+            elif i >= 73: return "Tier 4 (6'2\"+)"
+            return "Out of Range"
+        except: return "N/A"
 
     # --- 4. RECRUITMENT VIEW ---
     if role == "Recruitment":
         st.header(f"Recruitment Portal: {sel_center}")
-        # ... [Keep your existing Wizard Logic here] ...
-        # (Snippet for brevity)
-        if 'step' not in st.session_state: st.session_state.step = 1
         if st.session_state.step == 1:
             with st.container(border=True):
                 col1, col2 = st.columns(2)
-                s_type = col1.selectbox("Session Type", ["1 Person session", "2-3 people session", "4-5 people session"])
+                s_type = col1.selectbox("Session Category", ["1 Person session", "2-3 people session", "4-5 people session"])
                 num_pax = 1 if "1 Person" in s_type else (col1.slider("Count?", 2, 3) if "2-3" in s_type else col1.slider("Count?", 4, 5))
                 venue = col2.selectbox("Venue", [f"House {i+1}" for i in range(10)])
                 s_date, s_time = str(col2.date_input("Date")), str(col2.time_input("Time"))
@@ -78,6 +89,7 @@ if user_code in ACCESS_CODES:
             pax_list = []
             for i in range(num_pax):
                 st.markdown(f"---")
+                st.markdown(f"**Participant {i+1} Details**")
                 c1, c2, c3, c4 = st.columns(4)
                 rid = c1.text_input(f"Respondent ID", key=f"rid_{i}")
                 fn = c2.text_input(f"First Name", key=f"fn_{i}")
@@ -87,7 +99,7 @@ if user_code in ACCESS_CODES:
                 race = c5.selectbox(f"Race", ["East Asian", "South Asian", "Black", "Hispanic", "White", "Middle East", "Native American"], key=f"r_{i}")
                 h = c6.number_input(f"Height (In)", 58, 85, key=f"h_{i}")
                 age = c7.selectbox(f"Age Group", ["20-30", "30-40", "40-50", "50-60"], key=f"a_{i}")
-                hob = st.multiselect(f"Hobbies", ["Cooking", "Music", "Games", "Housekeeping", "Exercise"], key=f"hob_{i}")
+                hob = st.multiselect(f"Hobbies/Skills", ["Cooking", "Music", "Games", "Housekeeping", "Exercise"], key=f"hob_{i}")
                 pax_list.append({"rid": rid, "fn": fn, "status": status, "gender": gen, "race": race, "height": h, "age": age, "hobbies": str(hob)})
 
             if st.button("Review & Confirm →"):
@@ -95,11 +107,15 @@ if user_code in ACCESS_CODES:
                 st.session_state.step = 2; st.rerun()
 
         elif st.session_state.step == 2:
+            st.subheader("Final Review Before Submission")
             st.table(pd.DataFrame(st.session_state.temp['pax']))
-            if st.button("CONFIRM & SYNC", type="primary"):
+            c_back, c_conf = st.columns(2)
+            if c_back.button("← Edit"): st.session_state.step = 1; st.rerun()
+            if c_conf.button("CONFIRM & SYNC", type="primary"):
                 payload = {"action": "add", "center_name": sel_center, "center_code": c_code, "venue": st.session_state.temp['venue'], "type": st.session_state.temp['type'], "date": st.session_state.temp['date'], "time": st.session_state.temp['time'], "pax": st.session_state.temp['pax']}
                 new_id = push_data(payload)
-                if new_id: st.success(f"ID: {new_id}"); st.session_state.step = 1; st.balloons()
+                if new_id:
+                    st.success(f"Success! House ID: {new_id}"); st.session_state.step = 1; st.balloons()
 
     # --- 5. HOST VIEW ---
     elif role == "Host":
@@ -108,19 +124,23 @@ if user_code in ACCESS_CODES:
         prefixes = ["1-", "2-", "4-"]
         for i, tab in enumerate(h_tabs):
             with tab:
-                df = fetch_tab_data(prefixes[i] + c_code)
+                curr_tab = prefixes[i] + c_code
+                df = fetch_tab_data(curr_tab)
                 if not df.empty:
-                    v_sel = st.selectbox("Venue Filter", [f"House {j+1}" for j in range(10)], key=f"v_h_{i}")
-                    v_df = df[df['Venue Id'] == v_sel]
-                    for g_id, group in v_df.groupby('Group Id'):
-                        with st.expander(f"ID: {g_id}"):
+                    v_sel = st.selectbox("Select Venue Filter", [f"House {j+1}" for j in range(10)], key=f"v_host_{i}")
+                    v_df = df[df['Venue_Id'] == v_sel]
+                    for g_id, group in v_df.groupby('Group_Id'):
+                        with st.expander(f"[{group.iloc[0]['Scheduled_Time']}] ID: {g_id}"):
                             for _, p in group.iterrows():
-                                st.write(f"• ID: {p['Respondent Id']} | {p['First Name']} | {p['Booking Status']}")
+                                st.write(f"• ID: {p.get('Respondent_Id')} | {p.get('First Name')} | Status: {p.get('Booking_Status')}")
                             c_a, c_c, c_n = st.columns(3)
-                            if c_a.button("Arrived", key=f"a_{g_id}"): push_data({"action": "update", "center": prefixes[i] + c_code, "group_id": g_id, "status": "Arrived"}); st.rerun()
-                            if c_c.button("Completed", key=f"c_{g_id}"): push_data({"action": "update", "center": prefixes[i] + c_code, "group_id": g_id, "status": "Completed"}); st.rerun()
-                            if c_n.button("No-Show", key=f"n_{g_id}"): push_data({"action": "update", "center": prefixes[i] + c_code, "group_id": g_id, "status": "No-Show"}); st.rerun()
-                else: st.info("No data.")
+                            if c_a.button("Arrived", key=f"a_{g_id}"):
+                                push_data({"action": "update", "center": curr_tab, "group_id": g_id, "status": "Arrived"}); st.rerun()
+                            if c_c.button("Completed", key=f"c_{g_id}"):
+                                push_data({"action": "update", "center": curr_tab, "group_id": g_id, "status": "Completed"}); st.rerun()
+                            if c_n.button("No-Show", key=f"n_{g_id}"):
+                                push_data({"action": "update", "center": curr_tab, "group_id": g_id, "status": "No-Show"}); st.rerun()
+                else: st.info("No data in this category.")
 
     # --- 6. OVERVIEW ---
     else:
@@ -129,10 +149,27 @@ if user_code in ACCESS_CODES:
         for p in ["1-", "2-", "4-"]: frames.append(fetch_tab_data(p + c_code))
         all_data = pd.concat(frames, ignore_index=True)
         if not all_data.empty:
-            st.metric("Total Recruits", len(all_data), f"{1450 - len(all_data)} left")
-            st.bar_chart(all_data['Race'].value_counts())
-        else: st.info("Awaiting data...")
+            m1, m2, m3 = st.columns(3)
+            m1.metric("Total Recruited", len(all_data), f"{1450 - len(all_data)} left")
+            m2.metric("Fresh (Target 1015)", len(all_data[all_data['Status'] == 'Fresh']))
+            m3.metric("Total Completes", len(all_data[all_data['Booking_Status'] == 'Completed']))
+            
+            cl, cr = st.columns(2)
+            with cl:
+                st.subheader("Height Tiers")
+                all_data['Tier'] = all_data['Height'].apply(get_height_tier)
+                st.bar_chart(all_data['Tier'].value_counts())
+                st.subheader("Race Breakdown")
+                st.bar_chart(all_data['Race'].value_counts())
+            with cr:
+                st.subheader("Gender Split")
+                if 'Gender' in all_data.columns: st.pie_chart(all_data['Gender'].value_counts())
+                st.subheader("Hobby Quotas (>10%)")
+                for h in ["Cooking", "Music", "Games", "Housekeeping", "Exercise"]:
+                    count = all_data['Hobbies'].str.contains(h).sum()
+                    st.progress(min(count/145, 1.0), text=f"{h}: {count}")
+        else: st.info("Awaiting pilot entries...")
 
 else:
+    # CLEAN LANDING PAGE
     st.info("Welcome to Trident Project Command. Please enter your Center Access Code in the sidebar to begin.")
-    st.image(LOGO_URL, width=200)
