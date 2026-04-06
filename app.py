@@ -1,23 +1,25 @@
 import streamlit as st
 import pandas as pd
 import requests
-import random
-import string
 from datetime import datetime
 
+# --- PAGE CONFIG ---
 st.set_page_config(page_title="Trident Project Command", layout="wide")
 
-# --- 1. BRANDING & RAW LOGO CONNECTION ---
-# Using the raw version of your GitHub link so Streamlit can render it
+# --- 1. BRANDING & RAW LOGO ---
+# Raw GitHub link for the logo
 LOGO_URL = "https://raw.githubusercontent.com/malaykapoor95/Recruitment-engine/main/logo.png"
 
-# Top Header with Logo on the Right
+# Top Header Layout
 col_title, col_logo = st.columns([4, 1])
 with col_title:
     st.title("Trident Project Command")
-    st.caption(f"Pilot Operations | Started: April 6, 2026")
+    st.caption(f"Operational Dashboard | Pilot Phase | April 6, 2026")
 with col_logo:
-    st.image(LOGO_URL, width=120)
+    try:
+        st.image(LOGO_URL, width=120)
+    except:
+        st.write("Trident Research")
 
 st.divider()
 
@@ -27,20 +29,25 @@ CENTER_MAP = {"Center 1": "C1", "Center 2": "C2", "Center 3": "C3"}
 
 # --- 3. DATA HELPERS ---
 def fetch_tab_data(tab_name):
+    """Reads data from a specific tab in the 9-tab Google Sheet"""
     try:
         r = requests.get(f"{GAS_URL}?tab={tab_name}")
         data = r.json()
         if not data or len(data) < 2: return pd.DataFrame()
         return pd.DataFrame(data[1:], columns=data[0])
-    except: return pd.DataFrame()
+    except: 
+        return pd.DataFrame()
 
 def push_data(payload):
+    """Sends data to the GAS for adding recruits or updating status"""
     try:
         r = requests.post(GAS_URL, json=payload)
-        return r.text # Returns the generated Group ID (e.g., 2C1H001)
-    except: return None
+        return r.text # Returns the generated ID (e.g., 2C1H001)
+    except: 
+        return None
 
 def get_height_tier(inches):
+    """Calculates the specific research tiers for height"""
     try:
         i = int(inches)
         if 58 <= i <= 63: return "Tier 1 (4'10\"-5'2\")"
@@ -51,22 +58,27 @@ def get_height_tier(inches):
     except: return "N/A"
 
 # --- 4. SIDEBAR NAVIGATION ---
-st.sidebar.image(LOGO_URL, width=100)
 st.sidebar.title("Navigation")
 sel_center = st.sidebar.selectbox("Current Center", ["Center 1", "Center 2", "Center 3"])
 role = st.sidebar.selectbox("Access Level", ["Overview", "Recruitment", "Host"])
 c_code = CENTER_MAP[sel_center]
 
+# Ensure session state exists for the wizard
 if 'step' not in st.session_state: st.session_state.step = 1
 
 # --- 5. RECRUITMENT VIEW ---
 if role == "Recruitment":
     st.header(f"Recruitment Portal: {sel_center}")
+    
     if st.session_state.step == 1:
         with st.container(border=True):
             col1, col2 = st.columns(2)
             s_type = col1.selectbox("Session Category", ["1 Person session", "2-3 people session", "4-5 people session"])
-            num_pax = 1 if "1 Person" in s_type else (col1.slider("Count?", 2, 3) if "2-3" in s_type else col1.slider("Count?", 4, 5))
+            # Determine PAX count based on category
+            if "1 Person" in s_type: num_pax = 1
+            elif "2-3" in s_type: num_pax = col1.slider("Exact count?", 2, 3)
+            else: num_pax = col1.slider("Exact count?", 4, 5)
+            
             venue = col2.selectbox("Venue", [f"House {i+1}" for i in range(10)])
             s_date, s_time = str(col2.date_input("Date")), str(col2.time_input("Time"))
         
@@ -85,75 +97,111 @@ if role == "Recruitment":
             h = c6.number_input(f"Height (In)", 58, 85, key=f"h_{i}")
             age = c7.selectbox(f"Age Group", ["20-30", "30-40", "40-50", "50-60"], key=f"a_{i}")
             
-            hob = st.multiselect(f"Hobbies", ["Cooking", "Music", "Games", "Housekeeping", "Exercise"], key=f"hob_{i}")
+            hob = st.multiselect(f"Hobbies/Skills", ["Cooking", "Music", "Games", "Housekeeping", "Exercise"], key=f"hob_{i}")
             pax_list.append({"rid": rid, "fn": fn, "status": status, "gender": gen, "race": race, "height": h, "age": age, "hobbies": str(hob)})
 
-        if st.button("Review & Confirm →"):
+        if st.button("Review Session & Confirm →"):
             st.session_state.temp = {"type": s_type, "venue": venue, "date": s_date, "time": s_time, "pax": pax_list}
-            st.session_state.step = 2; st.rerun()
+            st.session_state.step = 2
+            st.rerun()
 
     elif st.session_state.step == 2:
-        st.subheader("Review Session Summary")
+        st.subheader("Review Details Before Syncing")
         st.table(pd.DataFrame(st.session_state.temp['pax']))
         c_back, c_conf = st.columns(2)
-        if c_back.button("← Edit Details"): st.session_state.step = 1; st.rerun()
-        if c_conf.button("CONFIRM & SYNC TO SHEET", type="primary"):
-            payload = {"action": "add", "center_name": sel_center, "center_code": c_code, "venue": st.session_state.temp['venue'], "type": st.session_state.temp['type'], "date": st.session_state.temp['date'], "time": st.session_state.temp['time'], "pax": st.session_state.temp['pax']}
+        if c_back.button("← Edit"): 
+            st.session_state.step = 1
+            st.rerun()
+        if c_conf.button("CONFIRM & GENERATE HOUSE ID", type="primary"):
+            payload = {
+                "action": "add", 
+                "center_name": sel_center, 
+                "center_code": c_code, 
+                "venue": st.session_state.temp['venue'], 
+                "type": st.session_state.temp['type'], 
+                "date": st.session_state.temp['date'], 
+                "time": st.session_state.temp['time'], 
+                "pax": st.session_state.temp['pax']
+            }
             new_id = push_data(payload)
             if new_id:
                 st.success(f"Successfully Booked! Group ID: {new_id}")
-                st.session_state.step = 1; st.balloons()
+                st.session_state.step = 1
+                st.balloons()
 
 # --- 6. HOST VIEW ---
 elif role == "Host":
-    st.header(f"Host Operations: {sel_center}")
-    h_tabs = st.tabs(["1 Pax", "2-3 Pax", "4-5 Pax"])
+    st.header(f"Host Dashboard: {sel_center}")
+    h_tabs = st.tabs(["1 Person", "2-3 People", "4-5 People"])
     prefixes = ["1-", "2-", "4-"]
+    
     for i, tab in enumerate(h_tabs):
         with tab:
-            curr_tab = prefixes[i] + c_code
-            df = fetch_tab_data(curr_tab)
+            current_tab_name = prefixes[i] + c_code
+            df = fetch_tab_data(current_tab_name)
             if not df.empty:
-                v_sel = st.selectbox("Select Venue", [f"House {j+1}" for j in range(10)], key=f"v_h_{i}")
+                v_sel = st.selectbox("Select Venue Filter", [f"House {j+1}" for j in range(10)], key=f"v_h_{i}")
+                # Use standard header names from our sheet setup
                 v_df = df[df['Venue ID'] == v_sel]
-                for g_id, group in v_df.groupby('Group ID'):
-                    with st.expander(f"[{group.iloc[0]['Scheduled Time']}] ID: {g_id}"):
-                        for _, p in group.iterrows():
-                            st.write(f"• ID: {p['Respondent ID']} | {p['First Name']} | {p['Booking Status']}")
-                        c_a, c_c = st.columns(2)
-                        if c_a.button("Arrived", key=f"a_{g_id}"):
-                            push_data({"action": "update", "center": curr_tab, "group_id": g_id, "status": "Arrived"}); st.rerun()
-                        if c_c.button("Completed", key=f"c_{g_id}"):
-                            push_data({"action": "update", "center": curr_tab, "group_id": g_id, "status": "Completed"}); st.rerun()
-            else: st.info("No data in this category.")
+                
+                if not v_df.empty:
+                    for g_id, group in v_df.groupby('Group ID'):
+                        with st.expander(f"[{group.iloc[0]['Scheduled Time']}] ID: {g_id}"):
+                            for _, p in group.iterrows():
+                                st.write(f"• ID: {p['Respondent ID']} | Name: {p['First Name']} | Status: **{p['Booking Status']}**")
+                            
+                            c_a, c_c, c_n = st.columns(3)
+                            if c_a.button("Arrived", key=f"a_{g_id}"):
+                                push_data({"action": "update", "center": current_tab_name, "group_id": g_id, "status": "Arrived"})
+                                st.rerun()
+                            if c_c.button("Completed", key=f"c_{g_id}"):
+                                push_data({"action": "update", "center": current_tab_name, "group_id": g_id, "status": "Completed"})
+                                st.rerun()
+                            if c_n.button("No-Show", key=f"n_{g_id}"):
+                                push_data({"action": "update", "center": current_tab_name, "group_id": g_id, "status": "No-Show"})
+                                st.rerun()
+                else:
+                    st.info("No participants scheduled for this venue category.")
+            else:
+                st.info("No data in this category.")
 
 # --- 7. OVERVIEW ---
 else:
-    st.header(f"Center Overview: {sel_center}")
+    st.header(f"Project Quota Overview: {sel_center}")
+    # Aggregate data from all 3 segmented tabs for the center
     frames = []
     for p in ["1-", "2-", "4-"]:
         frames.append(fetch_tab_data(p + c_code))
     all_data = pd.concat(frames, ignore_index=True)
+    
     if not all_data.empty:
+        # Top Level Metrics
         m1, m2, m3 = st.columns(3)
         m1.metric("Total Recruited", len(all_data), f"{1450 - len(all_data)} left")
-        fresh_n = len(all_data[all_data['Status'] == 'Fresh'])
-        m2.metric("Fresh Participants", fresh_n, "Target: 1015")
-        comp_n = len(all_data[all_data['Booking Status'] == 'Completed'])
-        m3.metric("Total Completes", comp_n)
         
-        c_left, c_right = st.columns(2)
-        with c_left:
-            st.subheader("Height Distribution")
+        fresh_n = len(all_data[all_data['Status'] == 'Fresh'])
+        m2.metric("Fresh (Min 1015)", fresh_n)
+        
+        comp_n = len(all_data[all_data['Booking Status'] == 'Completed'])
+        m3.metric("Completes Recorded", comp_n)
+
+        # Charts and Distributions
+        c_l, c_r = st.columns(2)
+        with c_l:
+            st.subheader("Height Tiers (Target Quotas)")
             all_data['Tier'] = all_data['Height (Inches)'].apply(get_height_tier)
             st.bar_chart(all_data['Tier'].value_counts())
+            
             st.subheader("Race Distribution")
             st.bar_chart(all_data['Race'].value_counts())
-        with c_right:
+
+        with c_r:
             st.subheader("Gender Split")
             st.pie_chart(all_data['Gender'].value_counts())
-            st.subheader("Hobby Quotas (>10%)")
+            
+            st.subheader("Hobby/Skill Quotas (>10% Target)")
             for h in ["Cooking", "Music", "Games", "Housekeeping", "Exercise"]:
                 count = all_data['Hobbies'].str.contains(h).sum()
                 st.progress(min(count/145, 1.0), text=f"{h}: {count} participants")
-    else: st.info("Awaiting pilot data...")
+    else:
+        st.info("Connection live. Awaiting initial recruitment entries...")
