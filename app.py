@@ -71,6 +71,9 @@ if not st.session_state.logged_in:
                     st.rerun()
                 else:
                     st.error("Access Denied. Invalid Code.")
+    
+    # CRITICAL FIX: Notice how this is aligned to the far left of the if statement.
+    # It guarantees the script stops running here if you aren't logged in.
     st.stop()
 
 # --- 4. TOP NAVIGATION (NO SIDEBAR) ---
