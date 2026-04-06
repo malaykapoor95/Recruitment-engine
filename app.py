@@ -3,22 +3,27 @@ import pandas as pd
 import requests
 
 # --- PAGE CONFIG ---
-st.set_page_config(page_title="Trident Scheduling Platform", layout="wide")
+st.set_page_config(page_title="Trident Scheduling Platform", layout="wide", initial_sidebar_state="collapsed")
 
-# --- 1. BRANDING & SOFTER STYLING ---
+# --- 1. BRANDING & STYLING ---
 st.markdown("""
     <style>
-    .reportview-container .main .block-container{ padding-top: 2rem; }
-    /* Softer Pastel Status Pills */
+    /* Hide the sidebar completely */
+    [data-testid="collapsedControl"] { display: none; }
+    section[data-testid="stSidebar"] { display: none; }
+    
+    .reportview-container .main .block-container{ padding-top: 1rem; }
+    /* Modern SaaS Metric Cards */
+    div[data-testid="metric-container"] { 
+        background-color: #ffffff; 
+        padding: 15px; 
+        border-radius: 12px;
+    }
+    /* Status Pills */
     .status-pill { padding: 4px 12px; border-radius: 12px; font-size: 12px; font-weight: 600; }
     .status-high { background-color: #fef2f2; color: #b91c1c; border: 1px solid #fecaca; }
     .status-medium { background-color: #fffbeb; color: #b45309; border: 1px solid #fde68a; }
     .status-low { background-color: #f0fdf4; color: #15803d; border: 1px solid #bbf7d0; }
-    /* Cleaner Metric Cards */
-    div[data-testid="metric-container"] { 
-        background-color: #ffffff; 
-        padding: 10px; 
-    }
     </style>
 """, unsafe_allow_html=True)
 
@@ -41,7 +46,7 @@ ACCESS_KEYS = {
 if 'logged_in' not in st.session_state: st.session_state.logged_in = False
 if 'issues' not in st.session_state: st.session_state.issues = []
 
-# --- 3. WELCOME & LOGIN SCREEN (NO PLACEHOLDERS) ---
+# --- 3. WELCOME & LOGIN SCREEN ---
 if not st.session_state.logged_in:
     col_t, col_l = st.columns([4, 1])
     col_l.image(LOGO_URL, width=120)
@@ -52,7 +57,7 @@ if not st.session_state.logged_in:
         with st.container(border=True):
             st.markdown("### Welcome to Trident Command")
             st.caption("Please authenticate to access your operational dashboard.")
-            # Text is fully visible and has NO example placeholder
+            # Visible Access Code Input
             user_code = st.text_input("Enter Access Code:")
             
             if st.button("Secure Login", type="primary", use_container_width=True):
@@ -60,51 +65,48 @@ if not st.session_state.logged_in:
                     st.session_state.logged_in = True
                     st.session_state.user_role = ACCESS_KEYS[user_code]["role"]
                     st.session_state.sel_center = ACCESS_KEYS[user_code]["center"]
+                    st.session_state.active_view = ACCESS_KEYS[user_code]["role"]
                     if st.session_state.user_role == "Admin":
-                        st.session_state.admin_view = "Overview"
+                        st.session_state.active_view = "Admin"
                     st.rerun()
                 else:
                     st.error("Access Denied. Invalid Code.")
     st.stop()
 
-# --- 4. AUTHENTICATED HEADER ---
-col_title, col_logo = st.columns([4, 1])
-with col_title:
+# --- 4. TOP NAVIGATION (NO SIDEBAR) ---
+c_title, c_role, c_center, c_logout = st.columns([4, 1.5, 1.5, 0.5])
+
+with c_title:
     st.markdown("### Trident Scheduling Platform")
-    st.caption("Multi-center operations dashboard | June 2026 MVP")
-with col_logo:
-    st.image(LOGO_URL, width=100)
+    st.caption("Multi-center operations dashboard MVP")
+
+with c_role:
+    if st.session_state.user_role == "Admin":
+        st.session_state.active_view = st.selectbox("View", ["Admin", "Recruitment", "Host"], label_visibility="collapsed")
+    else:
+        st.selectbox("View", [st.session_state.user_role], disabled=True, label_visibility="collapsed")
+
+with c_center:
+    if st.session_state.user_role == "Admin":
+        st.session_state.sel_center = st.selectbox("Center", ["Center 1", "Center 2", "Center 3"], index=["Center 1", "Center 2", "Center 3"].index(st.session_state.sel_center), label_visibility="collapsed")
+    else:
+        st.selectbox("Center", [st.session_state.sel_center], disabled=True, label_visibility="collapsed")
+
+with c_logout:
+    if st.button("⏏️", help="Log Out"):
+        st.session_state.logged_in = False
+        st.cache_data.clear()
+        st.rerun()
+
 st.divider()
 
 role = st.session_state.user_role
+active_view = st.session_state.active_view
 sel_center = st.session_state.sel_center
-
-if role == "Admin":
-    st.sidebar.title("Admin Controls")
-    sel_center = st.sidebar.selectbox("Override Center", ["Center 1", "Center 2", "Center 3"], index=["Center 1", "Center 2", "Center 3"].index(sel_center))
-    st.session_state.sel_center = sel_center
-    active_view = st.sidebar.selectbox("Impersonate View", ["Overview", "Recruitment", "Host"])
-    st.sidebar.divider()
-else:
-    active_view = role
-    st.sidebar.success(f"Logged in as: {role}")
-    st.sidebar.caption(f"Assigned to: {sel_center}")
-
-# Data Refresh Button for Speed
-if st.sidebar.button("🔄 Refresh Data", use_container_width=True):
-    st.cache_data.clear()
-    st.rerun()
-
-st.sidebar.write("")
-if st.sidebar.button("Log Out"):
-    st.session_state.logged_in = False
-    st.cache_data.clear()
-    st.rerun()
-
 c_code = CENTER_MAP[sel_center]
 
-# --- DATA HELPERS (CACHED FOR SPEED) ---
-@st.cache_data(ttl=60)
+# --- DATA HELPERS (AGGRESSIVELY CACHED FOR SPEED) ---
+@st.cache_data(ttl=120) # Caches data for 2 minutes to eliminate lag
 def fetch_tab_data(tab_name):
     try:
         r = requests.get(f"{GAS_URL}?tab={tab_name}")
@@ -119,12 +121,13 @@ def fetch_tab_data(tab_name):
 def push_data(payload):
     try: 
         r = requests.post(GAS_URL, json=payload)
-        st.cache_data.clear() # Auto-clears cache when new data is pushed
+        st.cache_data.clear() # Clears memory instantly when data is added/changed
         return r.text 
     except: return None
 
-frames = [fetch_tab_data(f"{p}{c_code}") for p in ["1-", "2-", "4-"]]
-df_all = pd.concat([f for f in frames if not f.empty], ignore_index=True) if frames else pd.DataFrame()
+with st.spinner("Syncing data..."):
+    frames = [fetch_tab_data(f"{p}{c_code}") for p in ["1-", "2-", "4-"]]
+    df_all = pd.concat([f for f in frames if not f.empty], ignore_index=True) if frames else pd.DataFrame()
 
 total_target = 1450
 total_sessions = len(df_all) if not df_all.empty else 0
@@ -143,10 +146,10 @@ def render_top_metrics():
     with m4:
         with st.container(border=True): st.metric("Pending", pending)
 
-def render_quick_panel(role_name):
+def render_quick_panel():
     with st.container(border=True):
         st.markdown("##### Active context")
-        st.markdown(f"**Role:** {role_name}<br>**Center:** {sel_center}<br>**City:** TBD", unsafe_allow_html=True)
+        st.markdown(f"**User:** Malay<br>**Role:** {active_view}<br>**Center:** {sel_center}<br>**City:** TBD", unsafe_allow_html=True)
     
     with st.container(border=True):
         st.markdown("##### Venues in this center")
@@ -170,25 +173,24 @@ def render_issues():
         for issue in reversed(filtered_issues):
             sev_class = f"status-{issue['severity'].lower()}"
             st.markdown(f"""
-                <div style="padding: 10px; border-radius: 8px; border: 1px solid #f1f5f9; background-color: #ffffff; margin-bottom: 10px;">
+                <div style="padding: 12px; border-radius: 8px; border: 1px solid #f1f5f9; margin-bottom: 10px;">
                     <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
-                        <strong>ID: {issue['resp_id']} | Venue: {issue['venue']}</strong>
+                        <strong>ID: {issue['resp_id']} | {issue['venue']}</strong>
                         <span class="status-pill {sev_class}">{issue['severity']}</span>
                     </div>
                     <span style="font-size: 14px; color: #475569;">{issue['note']}</span>
                 </div>
             """, unsafe_allow_html=True)
 
-
 # --- 5. OVERVIEW VIEW (ADMIN) ---
-if active_view == "Overview":
+if active_view == "Admin":
     render_top_metrics()
     st.write("")
-    col_main, col_side = st.columns([2, 1])
+    col_main, col_side = st.columns([2.2, 1]) # 8/4 split equivalent
     
     with col_main:
         with st.container(border=True):
-            st.markdown(f"##### 📊 {sel_center} Quota Status")
+            st.markdown(f"##### 🎛️ {sel_center} Quota Status")
             fresh_c = len(df_all[df_all.get('Status') == 'Fresh']) if not df_all.empty else 0
             st.progress(min(fresh_c/1015, 1.0), text=f"Fresh Participants ({fresh_c} / 1015)")
             st.progress(0.0, text=f"Repeat Participants (0 / 435)")
@@ -209,53 +211,48 @@ if active_view == "Overview":
                 with st.container(border=True):
                     st.markdown(f"🏢 **{v_name}**")
                     st.caption(f"Completed: **{v_comp}** | Pending: **{v_pend}**")
-    with col_side:
-        render_quick_panel("Admin")
+        
         render_issues()
+                    
+    with col_side:
+        render_quick_panel()
 
 # --- 6. RECRUITMENT VIEW ---
 elif active_view == "Recruitment":
     render_top_metrics()
     st.write("")
-    col_main, col_side = st.columns([2, 1])
+    col_main, col_side = st.columns([2.2, 1])
     
     with col_main:
-        if 'show_quotas' not in st.session_state: st.session_state.show_quotas = False
-        if st.button("📊 Toggle Demographic Quotas", use_container_width=True):
-            st.session_state.show_quotas = not st.session_state.show_quotas
-            st.rerun()
-
-        # Fixed: Only shows demographic splits, doesn't repeat top metrics
-        if st.session_state.show_quotas:
-            with st.container(border=True):
-                st.markdown(f"##### Detailed Quota Snapshot")
-                fresh_c = len(df_all[df_all.get('Status') == 'Fresh']) if not df_all.empty else 0
-                st.progress(min(fresh_c/1015, 1.0), text=f"Fresh Participants ({fresh_c} / 1015)")
-                st.progress(0.0, text=f"Repeat Participants (0 / 435)")
-                if not df_all.empty and 'Gender' in df_all.columns:
-                    st.markdown("---")
-                    m_c = len(df_all[df_all['Gender'] == 'Male'])
-                    f_c = len(df_all[df_all['Gender'] == 'Female'])
-                    st.progress(min(m_c/580, 1.0), text=f"Male ({m_c} / 580)")
-                    st.progress(min(f_c/580, 1.0), text=f"Female ({f_c} / 580)")
-
         with st.container(border=True):
             st.markdown("##### ➕ Add New Recruit(s)")
             tab_man, tab_csv = st.tabs(["Manual Entry", "Bulk CSV Upload"])
             
             with tab_man:
-                c1, c2 = st.columns(2)
-                s_type = c1.selectbox("Category", ["1 Person session", "2-3 people session", "4-5 people session"])
-                venue = c2.selectbox("Venue", [f"House {i+1}" for i in range(10)])
-                c3, c4 = st.columns(2)
-                rid = c3.text_input("Respondent ID")
-                fn = c4.text_input("First Name")
+                # FULL DEMOGRAPHIC FIELDS INCLUDED
+                c_a, c_b, c_c = st.columns(3)
+                s_type = c_a.selectbox("Category", ["1 Person", "2-3 People", "4-5 People"])
+                venue = c_b.selectbox("Venue", [f"House {i+1}" for i in range(10)])
+                status = c_c.selectbox("Status", ["Fresh", "Repeat"])
+                
+                c_d, c_e, c_f = st.columns(3)
+                rid = c_d.text_input("Respondent ID")
+                fn = c_e.text_input("First Name")
+                gen = c_f.selectbox("Gender", ["Male", "Female"])
+                
+                c_g, c_h, c_i = st.columns(3)
+                race = c_g.selectbox("Race", ["East Asian", "South Asian", "Black", "Hispanic", "White", "Middle East", "Native American"])
+                age = c_h.selectbox("Age Group", ["20-30", "30-40", "40-50", "50-60"])
+                h = c_i.number_input("Height (In)", 58, 85)
+                
+                hob = st.multiselect("Hobbies", ["Cooking", "Music", "Games", "Housekeeping", "Exercise"])
+                
                 if st.button("Add Single Recruit", type="primary"): 
                     st.success("Recruit added successfully.")
             
             with tab_csv:
                 st.info("Upload a CSV file containing your bulk respondent list.")
-                uploaded_file = st.file_uploader("Drop CSV file here", type=["csv"])
+                uploaded_file = st.file_uploader("Drop CSV file here", type=["csv"], label_visibility="collapsed")
                 if uploaded_file is not None:
                     try:
                         df_upload = pd.read_csv(uploaded_file)
@@ -270,12 +267,16 @@ elif active_view == "Recruitment":
             st.caption("2026-06-01 • 10:30 AM | House 2 - Remaining: **4**")
 
     with col_side:
-        render_quick_panel("Recruitment")
-        render_issues()
+        render_quick_panel()
+        with st.container(border=True):
+            st.markdown(f"##### Quota Snapshot")
+            fresh_c = len(df_all[df_all.get('Status') == 'Fresh']) if not df_all.empty else 0
+            st.progress(min(fresh_c/1015, 1.0), text=f"Fresh ({fresh_c} / 1015)")
+            st.progress(0.0, text=f"Repeat (0 / 435)")
 
 # --- 7. HOST VIEW (CENTER MANAGER) ---
 elif active_view == "Host":
-    col_main, col_side = st.columns([2, 1])
+    col_main, col_side = st.columns([2.2, 1])
     
     with col_main:
         with st.container(border=True):
@@ -298,7 +299,8 @@ elif active_view == "Host":
 
                 if v_df.empty: st.info("No participants found.")
                 for g_id, group in v_df.groupby(df.get('Group_Id', df.get('Group Id'))):
-                    with st.expander(f"Group: {g_id}"):
+                    with st.container(border=True):
+                        st.markdown(f"**Group: {g_id}**")
                         for _, p in group.iterrows():
                             status = p.get('Booking_Status', 'Scheduled')
                             color = "🟢" if status == "Completed" else "🔵" if status == "Arrived" else "🔴" if status == "No-Show" else "⚪"
@@ -306,19 +308,18 @@ elif active_view == "Host":
                         
                         ca, cc, cn = st.columns(3)
                         if ca.button("Mark Arrived", key=f"a_{g_id}", use_container_width=True): 
-                            with st.spinner("Syncing..."): push_data({"action": "update", "center": curr_tab, "group_id": g_id, "status": "Arrived"}); st.rerun()
+                            push_data({"action": "update", "center": curr_tab, "group_id": g_id, "status": "Arrived"}); st.rerun()
                         if cc.button("Mark Completed", key=f"c_{g_id}", type="primary", use_container_width=True): 
-                            with st.spinner("Syncing..."): push_data({"action": "update", "center": curr_tab, "group_id": g_id, "status": "Completed"}); st.rerun()
+                            push_data({"action": "update", "center": curr_tab, "group_id": g_id, "status": "Completed"}); st.rerun()
                         if cn.button("Mark No-Show", key=f"n_{g_id}", use_container_width=True): 
-                            with st.spinner("Syncing..."): push_data({"action": "update", "center": curr_tab, "group_id": g_id, "status": "No-Show"}); st.rerun()
+                            push_data({"action": "update", "center": curr_tab, "group_id": g_id, "status": "No-Show"}); st.rerun()
             else: st.info("No roster data available.")
 
     with col_side:
-        render_quick_panel("Venue Host")
+        render_quick_panel()
         
         with st.container(border=True):
             st.markdown("##### 🚨 Log Operational Issue")
-            st.caption("Reports are instantly sent to Admins.")
             iss_rid = st.text_input("Respondent ID (Required)")
             iss_venue = st.selectbox("Issue Venue", [f"House {i+1}" for i in range(10)])
             iss_session = st.selectbox("Session Type", ["1 Pax", "2-3 Pax", "4-5 Pax"])
