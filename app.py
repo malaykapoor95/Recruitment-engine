@@ -16,6 +16,7 @@ def init_db():
         gender TEXT, race TEXT, height_inches INTEGER, 
         hobby TEXT, session_type TEXT, 
         scheduled_date TEXT, scheduled_time TEXT,
+        group_id TEXT, -- Added to link people in the same session
         booking_status TEXT DEFAULT 'Scheduled'
     )''')
     conn.commit()
@@ -24,14 +25,14 @@ def init_db():
 init_db()
 
 # --- 2. DATA UTILITIES ---
-def get_data(query, params=()):
-    with sqlite3.connect('trident_study_v2.db') as conn:
-        return pd.read_sql_query(query, conn, params=params)
-
 def run_query(query, params=()):
     with sqlite3.connect('trident_study_v2.db') as conn:
         conn.execute(query, params)
         conn.commit()
+
+def get_data(query, params=()):
+    with sqlite3.connect('trident_study_v2.db') as conn:
+        return pd.read_sql_query(query, conn, params=params)
 
 def get_height_tier(inches):
     if 58 <= inches <= 63: return "Tier 1: 4'10\"-5'2\""
@@ -40,94 +41,107 @@ def get_height_tier(inches):
     elif inches >= 73: return "Tier 4: 6'2\"+"
     return "Out of Range"
 
-# --- 3. SIDEBAR NAVIGATION ---
-st.sidebar.title("Trident Command")
-# Updated Labels: Overview, Recruitment, Host
+# --- 3. SESSION STATE FOR WIZARD ---
+if 'step' not in st.session_state: st.session_state.step = 1
+if 'temp_data' not in st.session_state: st.session_state.temp_data = {}
+
+# --- 4. SIDEBAR ---
 role = st.sidebar.selectbox("Access Level", ["Overview", "Recruitment", "Host"])
 
-# --- 4. RECRUITMENT VIEW ---
+# --- 5. RECRUITMENT VIEW (The Multi-Person Wizard) ---
 if role == "Recruitment":
-    st.header("Recruitment Portal: Center 1 Entry")
-    existing_rep = get_data("SELECT COUNT(*) as count FROM participants WHERE status='Repeat'").iloc[0]['count']
-    st.info(f"Repeat Quota Used: {existing_rep} / 435")
+    st.header("Recruitment Portal")
 
-    with st.form("recruit_form", clear_on_submit=True):
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            fn, ln = st.text_input("First Name"), st.text_input("Last Name")
-            status = st.selectbox("Status", ["Fresh", "Repeat"])
-            age = st.selectbox("Age Group", ["20-30", "30-40", "40-50", "50-60"])
-        with col2:
-            gender = st.selectbox("Gender", ["Male", "Female"])
-            race = st.selectbox("Race", ["East Asian", "South Asian", "Black", "Hispanic", "White", "Middle East", "Native American"])
-            height = st.number_input("Height (Inches)", 58, 85)
-            session = st.selectbox("Session Type", ["1-pax", "2-3 pax", "4-5 pax"])
-        with col3:
-            s_date, s_time = st.date_input("Schedule Date"), st.time_input("Schedule Time")
-            venue = st.selectbox("Assign to Venue", [f"House {i+1}" for i in range(10)])
+    if st.session_state.step == 1:
+        st.subheader("Step 1: Session Logistics")
+        with st.container(border=True):
+            col1, col2 = st.columns(2)
+            s_type = col1.selectbox("Session Category", ["1 Person session", "2-3 people session", "4-5 people session"])
+            
+            # Determine how many input rows to show
+            if s_type == "1 Person session": num_pax = 1
+            elif s_type == "2-3 people session": num_pax = col1.slider("Exact number of people?", 2, 3)
+            else: num_pax = col1.slider("Exact number of people?", 4, 5)
+            
+            venue = col2.selectbox("Venue", [f"House {i+1}" for i in range(10)])
+            s_date = col2.date_input("Date")
+            s_time = col2.time_input("Time")
 
-        hobbies = st.multiselect("Hobbies", ["Cooking", "Music", "Games", "Housekeeping", "Exercise"])
+        # Collect data for each person
+        pax_list = []
+        for i in range(num_pax):
+            st.markdown(f"**Participant {i+1} Details**")
+            c1, c2, c3, c4 = st.columns(4)
+            fn = c1.text_input(f"First Name", key=f"fn_{i}")
+            ln = c2.text_input(f"Last Name", key=f"ln_{i}")
+            race = c3.selectbox(f"Race", ["East Asian", "South Asian", "Black", "Hispanic", "White", "Middle East", "Native American"], key=f"r_{i}")
+            height = c4.number_input(f"Height (In)", 58, 85, key=f"h_{i}")
+            
+            pax_list.append({"fn": fn, "ln": ln, "race": race, "height": height})
+
+        if st.button("Review Summary →"):
+            st.session_state.temp_data = {
+                "s_type": s_type, "venue": venue, "date": str(s_date), 
+                "time": str(s_time), "pax": pax_list
+            }
+            st.session_state.step = 2
+            st.rerun()
+
+    elif st.session_state.step == 2:
+        st.subheader("Step 2: Confirm Recruitment")
+        d = st.session_state.temp_data
         
-        if st.form_submit_button("Submit Recruitment"):
-            if status == "Repeat" and existing_rep >= 435:
-                st.error("Cannot book: Repeat quota is full.")
-            else:
-                query = "INSERT INTO participants (center_id, venue_id, status, first_name, last_name, age_group, gender, race, height_inches, hobby, session_type, scheduled_date, scheduled_time) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)"
-                run_query(query, ("Center 1", venue, status, fn, ln, age, gender, race, height, str(hobbies), session, str(s_date), str(s_time)))
-                st.success(f"Recruit scheduled for {s_date} at {s_time}")
-                st.rerun()
+        with st.container(border=True):
+            st.write(f"**Session:** {d['s_type']} | **Venue:** {d['venue']}")
+            st.write(f"**Scheduled for:** {d['date']} at {d['time']}")
+            st.divider()
+            st.table(pd.DataFrame(d['pax']))
+        
+        c1, c2 = st.columns(2)
+        if c1.button("← Back (Edit)"):
+            st.session_state.step = 1
+            st.rerun()
+        
+        if c2.button("CONFIRM & BOOK ALL", type="primary"):
+            group_id = datetime.now().strftime("%Y%m%d%H%M%S")
+            for person in d['pax']:
+                query = "INSERT INTO participants (center_id, venue_id, first_name, last_name, race, height_inches, session_type, scheduled_date, scheduled_time, group_id) VALUES (?,?,?,?,?,?,?,?,?,?)"
+                run_query(query, ("Center 1", d['venue'], person['fn'], person['ln'], person['race'], person['height'], d['s_type'], d['date'], d['time'], group_id))
+            
+            st.success("All participants booked successfully!")
+            st.session_state.step = 1
+            st.session_state.temp_data = {}
+            st.balloons()
+            # No rerun here so they can see the success message
 
-# --- 5. HOST VIEW ---
+# --- 6. HOST VIEW ---
 elif role == "Host":
-    st.header("Host Dashboard: Venue Operations")
+    st.header("Host Dashboard")
     selected_venue = st.selectbox("Select Your Venue", [f"House {i+1}" for i in range(10)])
     df = get_data("SELECT * FROM participants WHERE venue_id=? ORDER BY scheduled_time ASC", (selected_venue,))
     
     if not df.empty:
-        for _, row in df.iterrows():
-            with st.expander(f"[{row['scheduled_time']}] {row['first_name']} {row['last_name']} - {row['booking_status']}"):
-                c1, c2, c3 = st.columns(3)
-                if c1.button("Arrived", key=f"arr_{row['id']}"):
-                    run_query("UPDATE participants SET booking_status='Arrived' WHERE id=?", (row['id'],))
+        # Grouping by group_id so the host sees people in the same session together
+        for g_id, group in df.groupby('group_id'):
+            with st.expander(f"Session: {group.iloc[0]['scheduled_time']} ({len(group)} People)"):
+                for _, row in group.iterrows():
+                    st.write(f"{row['first_name']} {row['last_name']} - {row['booking_status']}")
+                
+                c1, c2 = st.columns(2)
+                if c1.button("Check-in Group", key=f"in_{g_id}"):
+                    run_query("UPDATE participants SET booking_status='Arrived' WHERE group_id=?", (g_id,))
                     st.rerun()
-                if c2.button("Completed", key=f"comp_{row['id']}"):
-                    run_query("UPDATE participants SET booking_status='Completed' WHERE id=?", (row['id'],))
+                if c2.button("Group Completed", key=f"out_{g_id}"):
+                    run_query("UPDATE participants SET booking_status='Completed' WHERE group_id=?", (g_id,))
                     st.rerun()
-                if c3.button("No-Show", key=f"no_{row['id']}"):
-                    run_query("UPDATE participants SET booking_status='No-Show' WHERE id=?", (row['id'],))
-                    st.rerun()
-    else: st.write("No participants scheduled.")
+    else: st.write("No sessions scheduled.")
 
-# --- 6. OVERVIEW VIEW ---
+# --- 7. OVERVIEW VIEW ---
 else:
-    st.header("Global Project Overview")
+    st.header("Global Overview")
     all_data = get_data("SELECT * FROM participants")
-    
     if not all_data.empty:
-        m1, m2, m3 = st.columns(3)
-        m1.metric("Total Recruited", len(all_data), f"{1450 - len(all_data)} left")
-        m2.metric("Fresh Count", len(all_data[all_data['status']=='Fresh']), "Goal: 1015")
-        m3.metric("Total Completes", len(all_data[all_data['booking_status'] == 'Completed']))
-
-        c_left, c_right = st.columns(2)
-        with c_left:
-            st.subheader("Height Tier Distribution")
-            all_data['Height Tier'] = all_data['height_inches'].apply(get_height_tier)
-            st.bar_chart(all_data['Height Tier'].value_counts())
-            
-            st.subheader("Race Tracking (>10% Target)")
-            st.bar_chart(all_data['race'].value_counts())
-
-        with c_right:
-            st.subheader("Age Group Breakdown")
-            st.write(all_data['age_group'].value_counts())
-            
-            st.subheader("Session Type Mix")
-            st.pie_chart(all_data['session_type'].value_counts())
-
-        st.subheader("Hobby/Skill Quotas (>10% Target)")
-        for hobby in ["Cooking", "Music", "Games", "Housekeeping", "Exercise"]:
-            count = all_data['hobby'].str.contains(hobby).sum()
-            st.progress(min(count/145, 1.0), text=f"{hobby}: {count} participants")
-    else:
-        st.info("System live. Waiting for recruitment data.")
+        st.metric("Total People Recruited", len(all_data))
+        all_data['Height Tier'] = all_data['height_inches'].apply(get_height_tier)
+        st.bar_chart(all_data['Height Tier'].value_counts())
+    else: st.info("Waiting for data...")
