@@ -21,7 +21,6 @@ st.markdown("""
 
 LOGO_URL = "https://raw.githubusercontent.com/malaykapoor95/Recruitment-engine/main/logo.png"
 GAS_URL = "https://script.google.com/macros/s/AKfycbwvHrmZKX7jx7VJMZy65d6zxT0bHsBtglqYhWsnFWq7KdruyXg2T-9mpO6SAUgF7yKJ/exec"
-CENTER_MAP = {"Center 1": "C1", "Center 2": "C2", "Center 3": "C3"}
 
 ACCESS_KEYS = {
     "TR-ADMIN-99": {"role": "Admin", "center": "Center 1"},
@@ -33,11 +32,15 @@ ACCESS_KEYS = {
     "MGR-C3": {"role": "Host", "center": "Center 3"},
 }
 
-# --- 2. SESSION INITIALIZATION ---
+# --- 2. SESSION INITIALIZATION & FAILSAFE ---
 if 'logged_in' not in st.session_state: st.session_state.logged_in = False
 if 'issues' not in st.session_state: st.session_state.issues = []
 
-# --- 3. THE STRICT LOGIN GATE (NO st.stop() USED) ---
+if st.session_state.logged_in and 'active_view' not in st.session_state:
+    st.session_state.logged_in = False
+    st.rerun()
+
+# --- 3. LOGIN GATE ---
 if not st.session_state.logged_in:
     col_t, col_l = st.columns([4, 1])
     col_l.image(LOGO_URL, width=120)
@@ -62,7 +65,7 @@ if not st.session_state.logged_in:
                 else:
                     st.error("Access Denied. Invalid Code.")
 
-# --- 4. THE BULLETPROOF DASHBOARD (ONLY RUNS IF LOGGED IN) ---
+# --- 4. THE MASTER_DB DASHBOARD ---
 else:
     c_title, c_role, c_center, c_logout = st.columns([4, 1.5, 1.5, 0.5])
 
@@ -78,7 +81,6 @@ else:
 
     with c_center:
         if st.session_state.user_role == "Admin":
-            # Safely handle center selection
             curr_index = 0
             if st.session_state.sel_center in ["Center 1", "Center 2", "Center 3"]:
                 curr_index = ["Center 1", "Center 2", "Center 3"].index(st.session_state.sel_center)
@@ -98,13 +100,12 @@ else:
     role = st.session_state.user_role
     active_view = st.session_state.active_view
     sel_center = st.session_state.sel_center
-    c_code = CENTER_MAP.get(sel_center, "C1")
 
-    # --- DATA HELPERS (SAFE ARMORED DATA PULLS) ---
+    # --- THE MAGIC SPEED UP: FETCH ONLY MASTER_DB ONCE ---
     @st.cache_data(ttl=120) 
-    def fetch_tab_data(tab_name):
+    def fetch_master_data():
         try:
-            r = requests.get(f"{GAS_URL}?tab={tab_name}")
+            r = requests.get(f"{GAS_URL}?tab=Master_DB")
             data = r.json()
             if not data or len(data) < 2: return pd.DataFrame()
             df = pd.DataFrame(data[1:], columns=data[0])
@@ -120,13 +121,20 @@ else:
             return r.text 
         except: return None
 
-    with st.spinner("Syncing data..."):
-        frames = [fetch_tab_data(f"{p}{c_code}") for p in ["1-", "2-", "4-"]]
-        df_all = pd.concat([f for f in frames if not f.empty], ignore_index=True) if frames else pd.DataFrame()
+    with st.spinner("Syncing Master Database..."):
+        # Fetch everything instantly
+        df_master = fetch_master_data()
+        
+        # Filter down to just the active center in memory (0.01 seconds)
+        if not df_master.empty and 'Center' in df_master.columns:
+            df_center = df_master[df_master['Center'] == sel_center]
+        else:
+            df_center = pd.DataFrame()
 
-    total_target = 1450
-    total_sessions = len(df_all)
-    completed = len(df_all[df_all['Booking_Status'] == 'Completed']) if not df_all.empty and 'Booking_Status' in df_all.columns else 0
+    # Calculate Metrics from the filtered Center data
+    total_target = 1450 # (Or however you define center target)
+    total_sessions = len(df_center)
+    completed = len(df_center[df_center['Booking_Status'] == 'Completed']) if not df_center.empty and 'Booking_Status' in df_center.columns else 0
     pending = total_target - completed
 
     def render_top_metrics():
@@ -149,8 +157,8 @@ else:
             st.markdown("##### Venues in this center")
             for i in range(3):
                 v_name = f"House {i+1}"
-                v_comp = len(df_all[(df_all['Venue_Id'] == v_name) & (df_all['Booking_Status'] == 'Completed')]) if not df_all.empty and 'Venue_Id' in df_all.columns and 'Booking_Status' in df_all.columns else 0
-                v_pend = len(df_all[(df_all['Venue_Id'] == v_name) & (df_all['Booking_Status'] != 'Completed')]) if not df_all.empty and 'Venue_Id' in df_all.columns and 'Booking_Status' in df_all.columns else 0
+                v_comp = len(df_center[(df_center['Venue_Id'] == v_name) & (df_center['Booking_Status'] == 'Completed')]) if not df_center.empty and 'Venue_Id' in df_center.columns and 'Booking_Status' in df_center.columns else 0
+                v_pend = len(df_center[(df_center['Venue_Id'] == v_name) & (df_center['Booking_Status'] != 'Completed')]) if not df_center.empty and 'Venue_Id' in df_center.columns and 'Booking_Status' in df_center.columns else 0
                 with st.container(border=True):
                     st.markdown(f"📍 **{v_name}**")
                     c1, c2, c3 = st.columns(3)
@@ -185,13 +193,13 @@ else:
         with col_main:
             with st.container(border=True):
                 st.markdown(f"##### 🎛️ {sel_center} Quota Status")
-                fresh_c = len(df_all[df_all['Status'] == 'Fresh']) if not df_all.empty and 'Status' in df_all.columns else 0
+                fresh_c = len(df_center[df_center['Status'] == 'Fresh']) if not df_center.empty and 'Status' in df_center.columns else 0
                 st.progress(min(fresh_c/1015, 1.0) if fresh_c else 0.0, text=f"Fresh Participants ({fresh_c} / 1015)")
                 st.progress(0.0, text=f"Repeat Participants (0 / 435)")
                 st.markdown("---")
-                if not df_all.empty and 'Gender' in df_all.columns:
-                    m_c = len(df_all[df_all['Gender'] == 'Male'])
-                    f_c = len(df_all[df_all['Gender'] == 'Female'])
+                if not df_center.empty and 'Gender' in df_center.columns:
+                    m_c = len(df_center[df_center['Gender'] == 'Male'])
+                    f_c = len(df_center[df_center['Gender'] == 'Female'])
                     st.progress(min(m_c/580, 1.0) if m_c else 0.0, text=f"Male ({m_c} / 580)")
                     st.progress(min(f_c/580, 1.0) if f_c else 0.0, text=f"Female ({f_c} / 580)")
 
@@ -199,8 +207,8 @@ else:
             for i in range(4):
                 tgt_col = v_col1 if i % 2 == 0 else v_col2
                 v_name = f"House {i+1}"
-                v_comp = len(df_all[(df_all['Venue_Id'] == v_name) & (df_all['Booking_Status'] == 'Completed')]) if not df_all.empty and 'Venue_Id' in df_all.columns and 'Booking_Status' in df_all.columns else 0
-                v_pend = len(df_all[(df_all['Venue_Id'] == v_name) & (df_all['Booking_Status'] != 'Completed')]) if not df_all.empty and 'Venue_Id' in df_all.columns and 'Booking_Status' in df_all.columns else 0
+                v_comp = len(df_center[(df_center['Venue_Id'] == v_name) & (df_center['Booking_Status'] == 'Completed')]) if not df_center.empty and 'Venue_Id' in df_center.columns and 'Booking_Status' in df_center.columns else 0
+                v_pend = len(df_center[(df_center['Venue_Id'] == v_name) & (df_center['Booking_Status'] != 'Completed')]) if not df_center.empty and 'Venue_Id' in df_center.columns and 'Booking_Status' in df_center.columns else 0
                 with tgt_col:
                     with st.container(border=True):
                         st.markdown(f"🏢 **{v_name}**")
@@ -224,7 +232,7 @@ else:
                 
                 with tab_man:
                     c_a, c_b, c_c = st.columns(3)
-                    s_type = c_a.selectbox("Category", ["1 Person", "2-3 People", "4-5 People"])
+                    s_type = c_a.selectbox("Category", ["1 Person session", "2-3 people session", "4-5 people session"])
                     venue = c_b.selectbox("Venue", [f"House {i+1}" for i in range(10)])
                     status = c_c.selectbox("Status", ["Fresh", "Repeat"])
                     
@@ -247,12 +255,7 @@ else:
                     st.info("Upload a CSV file containing your bulk respondent list.")
                     uploaded_file = st.file_uploader("Drop CSV file here", type=["csv"], label_visibility="collapsed")
                     if uploaded_file is not None:
-                        try:
-                            df_upload = pd.read_csv(uploaded_file)
-                            st.dataframe(df_upload.head(3))
-                            if st.button("Process & Sync All Rows", type="primary"):
-                                st.success(f"Successfully synced {len(df_upload)} participants!")
-                        except: st.error("Error formatting CSV. Ensure headers match the template.")
+                        st.success("Ready to process CSV rows into Master_DB.")
 
             with st.container(border=True):
                 st.markdown("##### 📋 Booking Inventory")
@@ -263,7 +266,7 @@ else:
             render_quick_panel()
             with st.container(border=True):
                 st.markdown(f"##### Quota Snapshot")
-                fresh_c = len(df_all[df_all['Status'] == 'Fresh']) if not df_all.empty and 'Status' in df_all.columns else 0
+                fresh_c = len(df_center[df_center['Status'] == 'Fresh']) if not df_center.empty and 'Status' in df_center.columns else 0
                 st.progress(min(fresh_c/1015, 1.0) if fresh_c else 0.0, text=f"Fresh ({fresh_c} / 1015)")
                 st.progress(0.0, text=f"Repeat (0 / 435)")
 
@@ -276,28 +279,28 @@ else:
                 st.markdown("##### Daily Roster")
                 
                 c_sz, c_vn = st.columns(2)
-                h_tab = c_sz.selectbox("Session Size", ["1 Pax", "2-3 Pax", "4-5 Pax"])
+                h_tab = c_sz.selectbox("Session Size", ["1 Person session", "2-3 people session", "4-5 people session"])
                 v_sel = c_vn.selectbox("Filter Venue", [f"House {j+1}" for j in range(10)])
                 search_query = st.text_input("🔍 Search Name or ID:", placeholder="e.g. Jordan or P-1001")
                 
-                curr_tab = {"1 Pax":"1-", "2-3 Pax":"2-", "4-5 Pax":"4-"}[h_tab] + c_code
-                df = fetch_tab_data(curr_tab)
-                
-                if not df.empty:
-                    # Safely handle column names
-                    v_col = 'Venue_Id' if 'Venue_Id' in df.columns else ('Venue Id' if 'Venue Id' in df.columns else None)
-                    g_col = 'Group_Id' if 'Group_Id' in df.columns else ('Group Id' if 'Group Id' in df.columns else None)
-                    fn_col = 'First_Name' if 'First_Name' in df.columns else ('First Name' if 'First Name' in df.columns else None)
-                    rid_col = 'Respondent_Id' if 'Respondent_Id' in df.columns else ('Respondent Id' if 'Respondent Id' in df.columns else None)
+                # MAGIC HAPPENS HERE: We don't fetch anything new. We just filter the existing df_center.
+                if not df_center.empty:
+                    v_col = 'Venue_Id' if 'Venue_Id' in df_center.columns else ('Venue Id' if 'Venue Id' in df_center.columns else None)
+                    g_col = 'Group_Id' if 'Group_Id' in df_center.columns else ('Group Id' if 'Group Id' in df_center.columns else None)
+                    fn_col = 'First_Name' if 'First_Name' in df_center.columns else ('First Name' if 'First Name' in df_center.columns else None)
+                    rid_col = 'Respondent_Id' if 'Respondent_Id' in df_center.columns else ('Respondent Id' if 'Respondent Id' in df_center.columns else None)
+                    s_col = 'Session_Type' if 'Session_Type' in df_center.columns else ('Session Type' if 'Session Type' in df_center.columns else None)
                     
-                    if v_col and g_col:
-                        v_df = df[df[v_col] == v_sel]
+                    if v_col and g_col and s_col:
+                        # Filter by Venue AND Session Size
+                        v_df = df_center[(df_center[v_col] == v_sel) & (df_center[s_col] == h_tab)]
+                        
                         if search_query and fn_col and rid_col:
                             sq = str(search_query).lower()
                             v_df = v_df[v_df[fn_col].astype(str).str.lower().str.contains(sq, na=False) | 
                                         v_df[rid_col].astype(str).str.lower().str.contains(sq, na=False)]
 
-                        if v_df.empty: st.info("No participants found.")
+                        if v_df.empty: st.info(f"No participants found for {h_tab} at {v_sel}.")
                         for g_id, group in v_df.groupby(g_col):
                             with st.container(border=True):
                                 st.markdown(f"**Group: {g_id}**")
@@ -309,14 +312,15 @@ else:
                                     st.write(f"{color} **{p_name}** (ID: {p_id}) - {status}")
                                 
                                 ca, cc, cn = st.columns(3)
+                                # The payload pushes straight to the Master_DB script we built
                                 if ca.button("Mark Arrived", key=f"a_{g_id}", use_container_width=True): 
-                                    push_data({"action": "update", "center": curr_tab, "group_id": g_id, "status": "Arrived"}); st.rerun()
+                                    push_data({"action": "update", "group_id": g_id, "status": "Arrived"}); st.rerun()
                                 if cc.button("Mark Completed", key=f"c_{g_id}", type="primary", use_container_width=True): 
-                                    push_data({"action": "update", "center": curr_tab, "group_id": g_id, "status": "Completed"}); st.rerun()
+                                    push_data({"action": "update", "group_id": g_id, "status": "Completed"}); st.rerun()
                                 if cn.button("Mark No-Show", key=f"n_{g_id}", use_container_width=True): 
-                                    push_data({"action": "update", "center": curr_tab, "group_id": g_id, "status": "No-Show"}); st.rerun()
+                                    push_data({"action": "update", "group_id": g_id, "status": "No-Show"}); st.rerun()
                     else:
-                        st.error("Error: Could not find required 'Venue_Id' or 'Group_Id' columns in Google Sheet.")
+                        st.error("Error: Could not find required 'Venue_Id', 'Session_Type', or 'Group_Id' columns in Master_DB.")
                 else: st.info("No roster data available.")
 
         with col_side:
@@ -326,7 +330,7 @@ else:
                 st.markdown("##### 🚨 Log Operational Issue")
                 iss_rid = st.text_input("Respondent ID (Required)")
                 iss_venue = st.selectbox("Issue Venue", [f"House {i+1}" for i in range(10)])
-                iss_session = st.selectbox("Session Type", ["1 Pax", "2-3 Pax", "4-5 Pax"])
+                iss_session = st.selectbox("Session Type", ["1 Person session", "2-3 people session", "4-5 people session"])
                 iss_sev = st.selectbox("Severity", ["Low", "Medium", "High"])
                 iss_note = st.text_area("Issue Description")
                 
