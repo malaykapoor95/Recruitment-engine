@@ -30,7 +30,6 @@ st.markdown("""
 LOGO_URL = "https://raw.githubusercontent.com/malaykapoor95/Recruitment-engine/main/logo.png"
 
 # --- 2. CONFIGURATION & ROLE KEYS ---
-# UPDATED WITH YOUR NEW DEPLOYED LINK:
 GAS_URL = "https://script.google.com/macros/s/AKfycbwvHrmZKX7jx7VJMZy65d6zxT0bHsBtglqYhWsnFWq7KdruyXg2T-9mpO6SAUgF7yKJ/exec"
 CENTER_MAP = {"Center 1": "C1", "Center 2": "C2", "Center 3": "C3"}
 
@@ -71,9 +70,7 @@ if not st.session_state.logged_in:
                     st.rerun()
                 else:
                     st.error("Access Denied. Invalid Code.")
-    
-    # CRITICAL FIX: Notice how this is aligned to the far left of the if statement.
-    # It guarantees the script stops running here if you aren't logged in.
+    # THE FIX: This stop command must be outside the column structure.
     st.stop()
 
 # --- 4. TOP NAVIGATION (NO SIDEBAR) ---
