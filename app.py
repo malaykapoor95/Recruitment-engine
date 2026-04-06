@@ -43,8 +43,16 @@ ACCESS_KEYS = {
     "MGR-C3": {"role": "Host", "center": "Center 3"},
 }
 
-if 'logged_in' not in st.session_state: st.session_state.logged_in = False
-if 'issues' not in st.session_state: st.session_state.issues = []
+# --- 2.5 SESSION STATE FAILSAFE (THE CRITICAL FIX) ---
+if 'logged_in' not in st.session_state: 
+    st.session_state.logged_in = False
+if 'issues' not in st.session_state: 
+    st.session_state.issues = []
+
+# If Streamlit remembers an old broken session, force a logout to clear the error!
+if st.session_state.logged_in and 'active_view' not in st.session_state:
+    st.session_state.logged_in = False
+    st.rerun()
 
 # --- 3. WELCOME & LOGIN SCREEN ---
 if not st.session_state.logged_in:
@@ -70,7 +78,6 @@ if not st.session_state.logged_in:
                     st.rerun()
                 else:
                     st.error("Access Denied. Invalid Code.")
-    # THE FIX: This stop command must be outside the column structure.
     st.stop()
 
 # --- 4. TOP NAVIGATION (NO SIDEBAR) ---
@@ -96,6 +103,8 @@ with c_logout:
     if st.button("⏏️", help="Log Out"):
         st.session_state.logged_in = False
         st.cache_data.clear()
+        for key in list(st.session_state.keys()):
+            del st.session_state[key] # Nuclear option to wipe all memory on logout
         st.rerun()
 
 st.divider()
