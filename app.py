@@ -6,7 +6,7 @@ from datetime import datetime
 # --- PAGE CONFIG ---
 st.set_page_config(page_title="Trident Project Command", layout="wide")
 
-# --- 1. BRANDING (Top Right Logo) ---
+# --- 1. BRANDING (Top Right Only) ---
 LOGO_URL = "https://raw.githubusercontent.com/malaykapoor95/Recruitment-engine/main/logo.png"
 
 col_title, col_logo = st.columns([4, 1])
@@ -18,10 +18,10 @@ with col_logo:
 
 st.divider()
 
-# --- 2. CONFIGURATION & STEALTH ACCESS ---
+# --- 2. CONFIGURATION & ACCESS CODES ---
 GAS_URL = "https://script.google.com/macros/s/AKfycbzHBCGpDIXjozsRDvJgStMIQvV_W1Lf_zSptRjrzGjMRuvtD2ZnUQd7gLESgEtegp_D/exec"
 
-# Access codes map to specific centers
+# Access codes for vendors
 ACCESS_CODES = {
     "TR-C1": "Center 1",
     "TR-C2": "Center 2",
@@ -30,7 +30,8 @@ ACCESS_CODES = {
 
 # --- 3. SIDEBAR ACCESS GATE ---
 st.sidebar.title("Secure Access")
-user_code = st.sidebar.text_input("Enter Center Access Code", type="password")
+# 'type' is removed so the code is VISIBLE upon entry
+user_code = st.sidebar.text_input("Enter Center Access Code")
 
 if user_code in ACCESS_CODES:
     sel_center = ACCESS_CODES[user_code]
@@ -49,7 +50,7 @@ if user_code in ACCESS_CODES:
             data = r.json()
             if not data or len(data) < 2: return pd.DataFrame()
             df = pd.DataFrame(data[1:], columns=data[0])
-            # DATA GUARD: Standardize headers to handle typos in Google Sheets
+            # Data Guard: Clean and standard headers
             df.columns = [str(c).strip().title() for c in df.columns]
             df.columns = [c.replace("Height (Inches)", "Height") for c in df.columns]
             df.columns = [c.replace("Booking Status", "Booking_Status") for c in df.columns]
@@ -62,7 +63,7 @@ if user_code in ACCESS_CODES:
     def push_data(payload):
         try:
             r = requests.post(GAS_URL, json=payload)
-            return r.text # Returns the generated House ID (e.g., 2C1H001)
+            return r.text 
         except: return None
 
     def get_height_tier(inches):
@@ -99,7 +100,7 @@ if user_code in ACCESS_CODES:
                 race = c5.selectbox(f"Race", ["East Asian", "South Asian", "Black", "Hispanic", "White", "Middle East", "Native American"], key=f"r_{i}")
                 h = c6.number_input(f"Height (In)", 58, 85, key=f"h_{i}")
                 age = c7.selectbox(f"Age Group", ["20-30", "30-40", "40-50", "50-60"], key=f"a_{i}")
-                hob = st.multiselect(f"Hobbies/Skills", ["Cooking", "Music", "Games", "Housekeeping", "Exercise"], key=f"hob_{i}")
+                hob = st.multiselect(f"Hobbies", ["Cooking", "Music", "Games", "Housekeeping", "Exercise"], key=f"hob_{i}")
                 pax_list.append({"rid": rid, "fn": fn, "status": status, "gender": gen, "race": race, "height": h, "age": age, "hobbies": str(hob)})
 
             if st.button("Review & Confirm →"):
@@ -107,15 +108,14 @@ if user_code in ACCESS_CODES:
                 st.session_state.step = 2; st.rerun()
 
         elif st.session_state.step == 2:
-            st.subheader("Final Review Before Submission")
+            st.subheader("Confirm Details")
             st.table(pd.DataFrame(st.session_state.temp['pax']))
             c_back, c_conf = st.columns(2)
             if c_back.button("← Edit"): st.session_state.step = 1; st.rerun()
             if c_conf.button("CONFIRM & SYNC", type="primary"):
                 payload = {"action": "add", "center_name": sel_center, "center_code": c_code, "venue": st.session_state.temp['venue'], "type": st.session_state.temp['type'], "date": st.session_state.temp['date'], "time": st.session_state.temp['time'], "pax": st.session_state.temp['pax']}
                 new_id = push_data(payload)
-                if new_id:
-                    st.success(f"Success! House ID: {new_id}"); st.session_state.step = 1; st.balloons()
+                if new_id: st.success(f"Success! ID: {new_id}"); st.session_state.step = 1; st.balloons()
 
     # --- 5. HOST VIEW ---
     elif role == "Host":
@@ -127,20 +127,17 @@ if user_code in ACCESS_CODES:
                 curr_tab = prefixes[i] + c_code
                 df = fetch_tab_data(curr_tab)
                 if not df.empty:
-                    v_sel = st.selectbox("Select Venue Filter", [f"House {j+1}" for j in range(10)], key=f"v_host_{i}")
+                    v_sel = st.selectbox("Select Venue", [f"House {j+1}" for j in range(10)], key=f"v_host_{i}")
                     v_df = df[df['Venue_Id'] == v_sel]
                     for g_id, group in v_df.groupby('Group_Id'):
                         with st.expander(f"[{group.iloc[0]['Scheduled_Time']}] ID: {g_id}"):
                             for _, p in group.iterrows():
                                 st.write(f"• ID: {p.get('Respondent_Id')} | {p.get('First Name')} | Status: {p.get('Booking_Status')}")
                             c_a, c_c, c_n = st.columns(3)
-                            if c_a.button("Arrived", key=f"a_{g_id}"):
-                                push_data({"action": "update", "center": curr_tab, "group_id": g_id, "status": "Arrived"}); st.rerun()
-                            if c_c.button("Completed", key=f"c_{g_id}"):
-                                push_data({"action": "update", "center": curr_tab, "group_id": g_id, "status": "Completed"}); st.rerun()
-                            if c_n.button("No-Show", key=f"n_{g_id}"):
-                                push_data({"action": "update", "center": curr_tab, "group_id": g_id, "status": "No-Show"}); st.rerun()
-                else: st.info("No data in this category.")
+                            if c_a.button("Arrived", key=f"a_{g_id}"): push_data({"action": "update", "center": curr_tab, "group_id": g_id, "status": "Arrived"}); st.rerun()
+                            if c_c.button("Completed", key=f"c_{g_id}"): push_data({"action": "update", "center": curr_tab, "group_id": g_id, "status": "Completed"}); st.rerun()
+                            if c_n.button("No-Show", key=f"n_{g_id}"): push_data({"action": "update", "center": curr_tab, "group_id": g_id, "status": "No-Show"}); st.rerun()
+                else: st.info("No data.")
 
     # --- 6. OVERVIEW ---
     else:
@@ -153,13 +150,12 @@ if user_code in ACCESS_CODES:
             m1.metric("Total Recruited", len(all_data), f"{1450 - len(all_data)} left")
             m2.metric("Fresh (Target 1015)", len(all_data[all_data['Status'] == 'Fresh']))
             m3.metric("Total Completes", len(all_data[all_data['Booking_Status'] == 'Completed']))
-            
             cl, cr = st.columns(2)
             with cl:
                 st.subheader("Height Tiers")
                 all_data['Tier'] = all_data['Height'].apply(get_height_tier)
                 st.bar_chart(all_data['Tier'].value_counts())
-                st.subheader("Race Breakdown")
+                st.subheader("Race Distribution")
                 st.bar_chart(all_data['Race'].value_counts())
             with cr:
                 st.subheader("Gender Split")
@@ -168,8 +164,8 @@ if user_code in ACCESS_CODES:
                 for h in ["Cooking", "Music", "Games", "Housekeeping", "Exercise"]:
                     count = all_data['Hobbies'].str.contains(h).sum()
                     st.progress(min(count/145, 1.0), text=f"{h}: {count}")
-        else: st.info("Awaiting pilot entries...")
+        else: st.info("Awaiting pilot data...")
 
 else:
-    # CLEAN LANDING PAGE
+    # CLEAN LANDING PAGE - NO LARGE LOGO
     st.info("Welcome to Trident Project Command. Please enter your Center Access Code in the sidebar to begin.")
