@@ -5,14 +5,20 @@ import requests
 # --- PAGE CONFIG ---
 st.set_page_config(page_title="Trident Scheduling Platform", layout="wide")
 
-# --- 1. BRANDING & STYLING ---
+# --- 1. BRANDING & SOFTER STYLING ---
 st.markdown("""
     <style>
     .reportview-container .main .block-container{ padding-top: 2rem; }
-    .status-pill { padding: 4px 12px; border-radius: 15px; font-size: 12px; font-weight: bold; }
-    .status-high { background-color: #fee2e2; color: #991b1b; border: 1px solid #f87171; }
-    .status-medium { background-color: #fef3c7; color: #92400e; border: 1px solid #fbbf24; }
-    .status-low { background-color: #e0e7ff; color: #3730a3; border: 1px solid #818cf8; }
+    /* Softer Pastel Status Pills */
+    .status-pill { padding: 4px 12px; border-radius: 12px; font-size: 12px; font-weight: 600; }
+    .status-high { background-color: #fef2f2; color: #b91c1c; border: 1px solid #fecaca; }
+    .status-medium { background-color: #fffbeb; color: #b45309; border: 1px solid #fde68a; }
+    .status-low { background-color: #f0fdf4; color: #15803d; border: 1px solid #bbf7d0; }
+    /* Cleaner Metric Cards */
+    div[data-testid="metric-container"] { 
+        background-color: #ffffff; 
+        padding: 10px; 
+    }
     </style>
 """, unsafe_allow_html=True)
 
@@ -35,7 +41,7 @@ ACCESS_KEYS = {
 if 'logged_in' not in st.session_state: st.session_state.logged_in = False
 if 'issues' not in st.session_state: st.session_state.issues = []
 
-# --- 3. WELCOME & LOGIN SCREEN ---
+# --- 3. WELCOME & LOGIN SCREEN (NO PLACEHOLDERS) ---
 if not st.session_state.logged_in:
     col_t, col_l = st.columns([4, 1])
     col_l.image(LOGO_URL, width=120)
@@ -46,7 +52,8 @@ if not st.session_state.logged_in:
         with st.container(border=True):
             st.markdown("### Welcome to Trident Command")
             st.caption("Please authenticate to access your operational dashboard.")
-            user_code = st.text_input("Enter Access Code (e.g., TR-ADMIN-99 or MGR-C1):")
+            # Text is fully visible and has NO example placeholder
+            user_code = st.text_input("Enter Access Code:")
             
             if st.button("Secure Login", type="primary", use_container_width=True):
                 if user_code in ACCESS_KEYS:
@@ -83,12 +90,12 @@ else:
     st.sidebar.success(f"Logged in as: {role}")
     st.sidebar.caption(f"Assigned to: {sel_center}")
 
-# NEW: Manual Refresh Button
+# Data Refresh Button for Speed
 if st.sidebar.button("🔄 Refresh Data", use_container_width=True):
-    st.cache_data.clear() # Wipes the memory so the next load pulls fresh from Google
+    st.cache_data.clear()
     st.rerun()
 
-st.sidebar.write("") # Spacer
+st.sidebar.write("")
 if st.sidebar.button("Log Out"):
     st.session_state.logged_in = False
     st.cache_data.clear()
@@ -96,10 +103,7 @@ if st.sidebar.button("Log Out"):
 
 c_code = CENTER_MAP[sel_center]
 
-# --- DATA HELPERS (NOW WITH CACHING) ---
-
-# The @st.cache_data decorator saves the result for 60 seconds.
-# This prevents the 3-6 second loading delay on every click.
+# --- DATA HELPERS (CACHED FOR SPEED) ---
 @st.cache_data(ttl=60)
 def fetch_tab_data(tab_name):
     try:
@@ -115,12 +119,10 @@ def fetch_tab_data(tab_name):
 def push_data(payload):
     try: 
         r = requests.post(GAS_URL, json=payload)
-        # Clear the cache automatically after we push new data so the UI updates instantly
-        st.cache_data.clear()
+        st.cache_data.clear() # Auto-clears cache when new data is pushed
         return r.text 
     except: return None
 
-# Load Center Data (This is now practically instant after the first load)
 frames = [fetch_tab_data(f"{p}{c_code}") for p in ["1-", "2-", "4-"]]
 df_all = pd.concat([f for f in frames if not f.empty], ignore_index=True) if frames else pd.DataFrame()
 
@@ -168,7 +170,7 @@ def render_issues():
         for issue in reversed(filtered_issues):
             sev_class = f"status-{issue['severity'].lower()}"
             st.markdown(f"""
-                <div style="padding: 10px; border-radius: 8px; border: 1px solid #e2e8f0; margin-bottom: 10px;">
+                <div style="padding: 10px; border-radius: 8px; border: 1px solid #f1f5f9; background-color: #ffffff; margin-bottom: 10px;">
                     <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
                         <strong>ID: {issue['resp_id']} | Venue: {issue['venue']}</strong>
                         <span class="status-pill {sev_class}">{issue['severity']}</span>
@@ -219,16 +221,23 @@ elif active_view == "Recruitment":
     
     with col_main:
         if 'show_quotas' not in st.session_state: st.session_state.show_quotas = False
-        if st.button("📊 Toggle Center Quotas View", use_container_width=True):
+        if st.button("📊 Toggle Demographic Quotas", use_container_width=True):
             st.session_state.show_quotas = not st.session_state.show_quotas
             st.rerun()
 
+        # Fixed: Only shows demographic splits, doesn't repeat top metrics
         if st.session_state.show_quotas:
             with st.container(border=True):
-                st.markdown(f"##### Quota Snapshot")
+                st.markdown(f"##### Detailed Quota Snapshot")
                 fresh_c = len(df_all[df_all.get('Status') == 'Fresh']) if not df_all.empty else 0
                 st.progress(min(fresh_c/1015, 1.0), text=f"Fresh Participants ({fresh_c} / 1015)")
                 st.progress(0.0, text=f"Repeat Participants (0 / 435)")
+                if not df_all.empty and 'Gender' in df_all.columns:
+                    st.markdown("---")
+                    m_c = len(df_all[df_all['Gender'] == 'Male'])
+                    f_c = len(df_all[df_all['Gender'] == 'Female'])
+                    st.progress(min(m_c/580, 1.0), text=f"Male ({m_c} / 580)")
+                    st.progress(min(f_c/580, 1.0), text=f"Female ({f_c} / 580)")
 
         with st.container(border=True):
             st.markdown("##### ➕ Add New Recruit(s)")
@@ -242,7 +251,6 @@ elif active_view == "Recruitment":
                 rid = c3.text_input("Respondent ID")
                 fn = c4.text_input("First Name")
                 if st.button("Add Single Recruit", type="primary"): 
-                    # Simulating a backend call that would trigger clear cache
                     st.success("Recruit added successfully.")
             
             with tab_csv:
@@ -297,7 +305,6 @@ elif active_view == "Host":
                             st.write(f"{color} **{p.get('First_Name')}** (ID: {p.get('Respondent_Id')}) - {status}")
                         
                         ca, cc, cn = st.columns(3)
-                        # When a host taps a button, a spinner shows, the data pushes, and the cache clears automatically
                         if ca.button("Mark Arrived", key=f"a_{g_id}", use_container_width=True): 
                             with st.spinner("Syncing..."): push_data({"action": "update", "center": curr_tab, "group_id": g_id, "status": "Arrived"}); st.rerun()
                         if cc.button("Mark Completed", key=f"c_{g_id}", type="primary", use_container_width=True): 
