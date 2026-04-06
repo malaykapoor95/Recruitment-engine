@@ -31,7 +31,7 @@ LOGO_URL = "https://raw.githubusercontent.com/malaykapoor95/Recruitment-engine/m
 
 # --- 2. CONFIGURATION & ROLE KEYS ---
 # UPDATED WITH YOUR NEW DEPLOYED LINK:
-GAS_URL = "https://script.google.com/macros/s/AKfycbyd9frwLp6l7vn6e26d7Vg07Sbo095ah2kWIFE6ZSmEsvpwUAesry90p_eKq0KNlEcr/exec"
+GAS_URL = "https://script.google.com/macros/s/AKfycbwvHrmZKX7jx7VJMZy65d6zxT0bHsBtglqYhWsnFWq7KdruyXg2T-9mpO6SAUgF7yKJ/exec"
 CENTER_MAP = {"Center 1": "C1", "Center 2": "C2", "Center 3": "C3"}
 
 ACCESS_KEYS = {
