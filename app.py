@@ -51,7 +51,7 @@ if not st.session_state.logged_in:
         with st.container(border=True):
             st.markdown("### Welcome to Trident Command")
             st.caption("Please authenticate to access your operational dashboard.")
-            user_code = st.text_input("Enter Access Code:")
+            user_code = st.text_input("Enter Access Code:", type="password")
             
             if st.button("Secure Login", type="primary", use_container_width=True):
                 if user_code in ACCESS_KEYS:
@@ -122,17 +122,14 @@ else:
         except: return None
 
     with st.spinner("Syncing Master Database..."):
-        # Fetch everything instantly
         df_master = fetch_master_data()
         
-        # Filter down to just the active center in memory (0.01 seconds)
         if not df_master.empty and 'Center' in df_master.columns:
             df_center = df_master[df_master['Center'] == sel_center]
         else:
             df_center = pd.DataFrame()
 
-    # Calculate Metrics from the filtered Center data
-    total_target = 1450 # (Or however you define center target)
+    total_target = 1450 
     total_sessions = len(df_center)
     completed = len(df_center[df_center['Booking_Status'] == 'Completed']) if not df_center.empty and 'Booking_Status' in df_center.columns else 0
     pending = total_target - completed
@@ -246,16 +243,71 @@ else:
                     age = c_h.selectbox("Age Group", ["20-30", "30-40", "40-50", "50-60"])
                     h = c_i.number_input("Height (In)", 58, 85)
                     
+                    c_j, c_k = st.columns(2)
+                    r_date = c_j.date_input("Scheduled Date")
+                    r_time = c_k.time_input("Scheduled Time")
+                    
                     hob = st.multiselect("Hobbies", ["Cooking", "Music", "Games", "Housekeeping", "Exercise"])
                     
-                    if st.button("Add Single Recruit", type="primary"): 
-                        st.success("Recruit added successfully.")
+                    if st.button("Add Single Recruit", type="primary"):
+                        if not rid or not fn:
+                            st.error("Respondent ID and First Name are required.")
+                        else:
+                            hobbies_str = ", ".join(hob)
+                            payload = {
+                                "action": "add",
+                                "type": s_type,
+                                "venue": venue,
+                                "center_name": sel_center,
+                                "date": str(r_date),
+                                "time": str(r_time),
+                                "pax": [{
+                                    "rid": rid, "fn": fn, "status": status, "gender": gen, 
+                                    "race": race, "height": h, "age": age, "hobbies": hobbies_str
+                                }]
+                            }
+                            with st.spinner("Syncing to Master_DB..."):
+                                push_data(payload)
+                                st.success(f"{fn} added successfully!")
+                                st.rerun()
                 
                 with tab_csv:
                     st.info("Upload a CSV file containing your bulk respondent list.")
                     uploaded_file = st.file_uploader("Drop CSV file here", type=["csv"], label_visibility="collapsed")
                     if uploaded_file is not None:
-                        st.success("Ready to process CSV rows into Master_DB.")
+                        try:
+                            df_upload = pd.read_csv(uploaded_file)
+                            st.dataframe(df_upload.head(3))
+                            
+                            if st.button("Process & Sync All Rows", type="primary"):
+                                pax_list = []
+                                for _, row in df_upload.iterrows():
+                                    pax_list.append({
+                                        "rid": str(row.get('Respondent_ID', '')),
+                                        "fn": str(row.get('First_Name', '')),
+                                        "status": str(row.get('Status', 'Fresh')),
+                                        "gender": str(row.get('Gender', '')),
+                                        "race": str(row.get('Race', '')),
+                                        "height": str(row.get('Height', '')),
+                                        "age": str(row.get('Age_Group', '')),
+                                        "hobbies": str(row.get('Hobbies', ''))
+                                    })
+                                
+                                payload = {
+                                    "action": "add",
+                                    "type": s_type, 
+                                    "venue": venue, 
+                                    "center_name": sel_center,
+                                    "date": str(r_date),
+                                    "time": str(r_time),
+                                    "pax": pax_list
+                                }
+                                with st.spinner(f"Batch syncing {len(df_upload)} rows..."):
+                                    push_data(payload)
+                                    st.success(f"Successfully synced {len(df_upload)} participants!")
+                                    st.rerun()
+                        except Exception as e: 
+                            st.error(f"Error reading CSV: Ensure headers match exactly. {e}")
 
             with st.container(border=True):
                 st.markdown("##### 📋 Booking Inventory")
@@ -264,11 +316,28 @@ else:
 
         with col_side:
             render_quick_panel()
+            
             with st.container(border=True):
                 st.markdown(f"##### Quota Snapshot")
                 fresh_c = len(df_center[df_center['Status'] == 'Fresh']) if not df_center.empty and 'Status' in df_center.columns else 0
+                rep_c = len(df_center[df_center['Status'] == 'Repeat']) if not df_center.empty and 'Status' in df_center.columns else 0
                 st.progress(min(fresh_c/1015, 1.0) if fresh_c else 0.0, text=f"Fresh ({fresh_c} / 1015)")
-                st.progress(0.0, text=f"Repeat (0 / 435)")
+                st.progress(min(rep_c/435, 1.0) if rep_c else 0.0, text=f"Repeat ({rep_c} / 435)")
+                
+                st.markdown("---")
+                m_c = len(df_center[df_center['Gender'] == 'Male']) if not df_center.empty and 'Gender' in df_center.columns else 0
+                f_c = len(df_center[df_center['Gender'] == 'Female']) if not df_center.empty and 'Gender' in df_center.columns else 0
+                st.progress(min(m_c/580, 1.0) if m_c else 0.0, text=f"Male ({m_c} / 580)")
+                st.progress(min(f_c/580, 1.0) if f_c else 0.0, text=f"Female ({f_c} / 580)")
+                
+                st.markdown("---")
+                age_c = len(df_center[df_center['Age_Group'] == '30-40']) if not df_center.empty and 'Age_Group' in df_center.columns else 0
+                st.progress(min(age_c/435, 1.0) if age_c else 0.0, text=f"Age 30-40 ({age_c} / 435)")
+                
+                ea_c = len(df_center[df_center['Race'] == 'East Asian']) if not df_center.empty and 'Race' in df_center.columns else 0
+                st.progress(min(ea_c/145, 1.0) if ea_c else 0.0, text=f"East Asian ({ea_c} / 145)")
+                
+            render_issues()
 
     # --- 7. HOST VIEW (CENTER MANAGER) ---
     elif active_view == "Host":
@@ -283,7 +352,6 @@ else:
                 v_sel = c_vn.selectbox("Filter Venue", [f"House {j+1}" for j in range(10)])
                 search_query = st.text_input("🔍 Search Name or ID:", placeholder="e.g. Jordan or P-1001")
                 
-                # MAGIC HAPPENS HERE: We don't fetch anything new. We just filter the existing df_center.
                 if not df_center.empty:
                     v_col = 'Venue_Id' if 'Venue_Id' in df_center.columns else ('Venue Id' if 'Venue Id' in df_center.columns else None)
                     g_col = 'Group_Id' if 'Group_Id' in df_center.columns else ('Group Id' if 'Group Id' in df_center.columns else None)
@@ -292,7 +360,6 @@ else:
                     s_col = 'Session_Type' if 'Session_Type' in df_center.columns else ('Session Type' if 'Session Type' in df_center.columns else None)
                     
                     if v_col and g_col and s_col:
-                        # Filter by Venue AND Session Size
                         v_df = df_center[(df_center[v_col] == v_sel) & (df_center[s_col] == h_tab)]
                         
                         if search_query and fn_col and rid_col:
@@ -312,7 +379,6 @@ else:
                                     st.write(f"{color} **{p_name}** (ID: {p_id}) - {status}")
                                 
                                 ca, cc, cn = st.columns(3)
-                                # The payload pushes straight to the Master_DB script we built
                                 if ca.button("Mark Arrived", key=f"a_{g_id}", use_container_width=True): 
                                     push_data({"action": "update", "group_id": g_id, "status": "Arrived"}); st.rerun()
                                 if cc.button("Mark Completed", key=f"c_{g_id}", type="primary", use_container_width=True): 
